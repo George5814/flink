@@ -18,9 +18,14 @@
 
 package org.apache.flink.api.java.operators;
 
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.Public;
+import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.io.OutputFormat;
 import org.apache.flink.api.common.operators.GenericDataSinkBase;
+import org.apache.flink.api.common.operators.Keys;
 import org.apache.flink.api.common.operators.Operator;
 import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.operators.Ordering;
@@ -32,7 +37,7 @@ import org.apache.flink.api.java.DataSet;
 
 import java.util.Arrays;
 
-
+@Public
 public class DataSink<T> {
 	
 	private final OutputFormat<T> format;
@@ -43,7 +48,7 @@ public class DataSink<T> {
 	
 	private String name;
 	
-	private int parallelism = -1;
+	private int parallelism = ExecutionConfig.PARALLELISM_DEFAULT;
 
 	private Configuration parameters;
 
@@ -68,15 +73,18 @@ public class DataSink<T> {
 		this.type = type;
 	}
 
-	
+
+	@Internal
 	public OutputFormat<T> getFormat() {
 		return format;
 	}
-	
+
+	@Internal
 	public TypeInformation<T> getType() {
 		return type;
 	}
-	
+
+	@Internal
 	public DataSet<T> getDataSet() {
 		return data;
 	}
@@ -105,6 +113,7 @@ public class DataSink<T> {
 	 * @see Order
 	 */
 	@Deprecated
+	@PublicEvolving
 	public DataSink<T> sortLocalOutput(int field, Order order) {
 
 		// get flat keys
@@ -151,6 +160,7 @@ public class DataSink<T> {
 	 * @see Order
 	 */
 	@Deprecated
+	@PublicEvolving
 	public DataSink<T> sortLocalOutput(String fieldExpression, Order order) {
 
 		int numFields;
@@ -259,12 +269,13 @@ public class DataSink<T> {
 	 * @return This data sink with set parallelism.
 	 */
 	public DataSink<T> setParallelism(int parallelism) {
-		
-		if(parallelism < 1) {
-			throw new IllegalArgumentException("The parallelism of an operator must be at least 1.");
+		if (parallelism != ExecutionConfig.PARALLELISM_UNKNOWN) {
+			if (parallelism < 1 && parallelism != ExecutionConfig.PARALLELISM_DEFAULT) {
+				throw new IllegalArgumentException("The parallelism of an operator must be at least 1.");
+			}
+			this.parallelism = parallelism;
 		}
-		this.parallelism = parallelism;
-		
+
 		return this;
 	}
 }

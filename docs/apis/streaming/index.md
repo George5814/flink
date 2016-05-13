@@ -3,7 +3,7 @@ title: "Flink DataStream API Programming Guide"
 
 # Top-level navigation
 top-nav-group: apis
-top-nav-pos: 1
+top-nav-pos: 2
 top-nav-title: <strong>Streaming Guide</strong> (DataStream API)
 
 # Sub-level navigation
@@ -38,9 +38,13 @@ example write the data to files, or to standard output (for example the command 
 terminal). Flink programs run in a variety of contexts, standalone, or embedded in other programs.
 The execution can happen in a local JVM, or on clusters of many machines.
 
-In order to create your own Flink DataStream program, we encourage you to start with the
-[program skeleton](#program-skeleton) and gradually add your own
-[transformations](#transformations). The remaining sections act as references for additional
+Please see [basic concepts]({{ site.baseurl }}/apis/common/index.html) for an introduction
+to the basic concepts of the Flink API.
+
+In order to create your own Flink DataStream program, we encourage you to start with
+[anatomy of a Flink Program]({{ site.baseurl }}/apis/common/index.html#anatomy-of-a-flink-program)
+and gradually add your own
+[transformations](#datastream-transformations). The remaining sections act as references for additional
 operations and advanced features.
 
 
@@ -75,7 +79,7 @@ public class WindowWordCount {
                 .socketTextStream("localhost", 9999)
                 .flatMap(new Splitter())
                 .keyBy(0)
-                .timeWindow(Time.of(5, TimeUnit.SECONDS))
+                .timeWindow(Time.seconds(5))
                 .sum(1);
 
         dataStream.print();
@@ -99,7 +103,6 @@ public class WindowWordCount {
 
 <div data-lang="scala" markdown="1">
 {% highlight scala %}
-import java.util.concurrent.TimeUnit
 
 import org.apache.flink.streaming.api.scala._
 import org.apache.flink.streaming.api.windowing.time.Time
@@ -113,7 +116,7 @@ object WindowWordCount {
     val counts = text.flatMap { _.toLowerCase.split("\\W+") filter { _.nonEmpty } }
       .map { (_, 1) }
       .keyBy(0)
-      .timeWindow(Time.of(5, TimeUnit.SECONDS))
+      .timeWindow(Time.seconds(5))
       .sum(1)
 
     counts.print
@@ -138,303 +141,8 @@ word count program. If you want to see counts greater than 1, type the same word
 
 {% top %}
 
-
-Linking with Flink
-------------------
-
-To write programs with Flink, you need to include the Flink DataStream library corresponding to
-your programming language in your project.
-
-The simplest way to do this is to use one of the quickstart scripts: either for
-[Java]({{ site.baseurl }}/quickstart/java_api_quickstart.html) or for [Scala]({{ site.baseurl }}/quickstart/scala_api_quickstart.html). They
-create a blank project from a template (a Maven Archetype), which sets up everything for you. To
-manually create the project, you can use the archetype and create a project by calling:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight bash %}
-mvn archetype:generate /
-    -DarchetypeGroupId=org.apache.flink/
-    -DarchetypeArtifactId=flink-quickstart-java /
-    -DarchetypeVersion={{site.version }}
-{% endhighlight %}
-</div>
-<div data-lang="scala" markdown="1">
-{% highlight bash %}
-mvn archetype:generate /
-    -DarchetypeGroupId=org.apache.flink/
-    -DarchetypeArtifactId=flink-quickstart-scala /
-    -DarchetypeVersion={{site.version }}
-{% endhighlight %}
-</div>
-</div>
-
-The archetypes are working for stable releases and preview versions (`-SNAPSHOT`).
-
-If you want to add Flink to an existing Maven project, add the following entry to your
-*dependencies* section in the *pom.xml* file of your project:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight xml %}
-<dependency>
-  <groupId>org.apache.flink</groupId>
-  <artifactId>flink-streaming-java{{ site.scala_version_suffix }}</artifactId>
-  <version>{{site.version }}</version>
-</dependency>
-<dependency>
-  <groupId>org.apache.flink</groupId>
-  <artifactId>flink-clients{{ site.scala_version_suffix }}</artifactId>
-  <version>{{site.version }}</version>
-</dependency>
-{% endhighlight %}
-</div>
-<div data-lang="scala" markdown="1">
-{% highlight xml %}
-<dependency>
-  <groupId>org.apache.flink</groupId>
-  <artifactId>flink-streaming-scala{{ site.scala_version_suffix }}</artifactId>
-  <version>{{site.version }}</version>
-</dependency>
-<dependency>
-  <groupId>org.apache.flink</groupId>
-  <artifactId>flink-clients{{ site.scala_version_suffix }}</artifactId>
-  <version>{{site.version }}</version>
-</dependency>
-{% endhighlight %}
-</div>
-</div>
-
-In order to create your own Flink program, we encourage you to start with the
-[program skeleton](#program-skeleton) and gradually add your own
-[transformations](#transformations).
-
-{% top %}
-
-Program Skeleton
-----------------
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-
-<br />
-
-As presented in the [example](#example-program), Flink DataStream programs look like regular Java
-programs with a `main()` method. Each program consists of the same basic parts:
-
-1. Obtaining a `StreamExecutionEnvironment`,
-2. Connecting to data stream sources,
-3. Specifying transformations on the data streams,
-4. Specifying output for the processed data,
-5. Executing the program.
-
-We will now give an overview of each of those steps, please refer to the respective sections for
-more details.
-
-The `StreamExecutionEnvironment` is the basis for all Flink DataStream programs. You can
-obtain one using these static methods on class `StreamExecutionEnvironment`:
-
-{% highlight java %}
-getExecutionEnvironment()
-
-createLocalEnvironment()
-createLocalEnvironment(int parallelism)
-createLocalEnvironment(int parallelism, Configuration customConfiguration)
-
-createRemoteEnvironment(String host, int port, String... jarFiles)
-createRemoteEnvironment(String host, int port, int parallelism, String... jarFiles)
-{% endhighlight %}
-
-Typically, you only need to use `getExecutionEnvironment()`, since this
-will do the right thing depending on the context: if you are executing
-your program inside an IDE or as a regular Java program it will create
-a local environment that will execute your program on your local machine. If
-you created a JAR file from your program, and invoke it through the [command line]({{ site.baseurl }}/apis/cli.html),
-the Flink cluster manager will execute your main method and `getExecutionEnvironment()` will return
-an execution environment for executing your program on a cluster.
-
-For specifying data sources the execution environment has several methods
-to read from files, sockets, and external systems using various methods. To just read
-data from a socket (useful also for debugging), you can use:
-
-{% highlight java %}
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-
-DataStream<String> lines = env.socketTextStream("localhost", 9999)
-{% endhighlight %}
-
-This will give you a DataStream on which you can then apply transformations. For
-more information on data sources and input formats, please refer to
-[Data Sources](#data-sources).
-
-Once you have a DataStream you can apply transformations to create a new
-DataStream which you can then write to a socket, transform again,
-combine with other DataStreams, or push to an external system (e.g., a message queue, or a file system).
-You apply transformations by calling
-methods on DataStream with your own custom transformation functions. For example,
-a map transformation looks like this:
-
-{% highlight java %}
-DataStream<String> input = ...;
-
-DataStream<Integer> intValues = input.map(new MapFunction<String, Integer>() {
-    @Override
-    public Integer map(String value) {
-        return Integer.parseInt(value);
-    }
-});
-{% endhighlight %}
-
-This will create a new DataStream by converting every String in the original
-stream to an Integer. For more information and a list of all the transformations,
-please refer to [Transformations](#transformations).
-
-Once you have a DataStream containing your final results, you can push the result
-to an external system (HDFS, Kafka, Elasticsearch), write it to a socket, write to a file,
-or print it.
-
-{% highlight java %}
-writeAsText(String path, ...)
-writeAsCsv(String path, ...)
-writeToSocket(String hostname, int port, ...)
-
-print()
-
-addSink(...)
-{% endhighlight %}
-
-Once you specified the complete program you need to **trigger the program execution** by
-calling `execute()` on `StreamExecutionEnvironment`. This will either execute on
-the local machine or submit the program for execution on a cluster, depending on the chosen execution environment.
-
-{% highlight java %}
-env.execute();
-{% endhighlight %}
-
-</div>
-<div data-lang="scala" markdown="1">
-
-<br />
-
-As presented in the [example](#example-program), Flink DataStream programs look like regular Scala
-programs with a `main()` method. Each program consists of the same basic parts:
-
-1. Obtaining a `StreamExecutionEnvironment`,
-2. Connecting to data stream sources,
-3. Specifying transformations on the data streams,
-4. Specifying output for the processed data,
-5. Executing the program.
-
-We will now give an overview of each of those steps, please refer to the respective sections for
-more details.
-
-The `StreamExecutionEnvironment` is the basis for all Flink DataStream programs. You can
-obtain one using these static methods on class `StreamExecutionEnvironment`:
-
-{% highlight scala %}
-def getExecutionEnvironment
-
-def createLocalEnvironment(parallelism: Int =  Runtime.getRuntime.availableProcessors())
-
-def createRemoteEnvironment(host: String, port: Int, jarFiles: String*)
-def createRemoteEnvironment(host: String, port: Int, parallelism: Int, jarFiles: String*)
-{% endhighlight %}
-
-Typically, you only need to use `getExecutionEnvironment`, since this
-will do the right thing depending on the context: if you are executing
-your program inside an IDE or as a regular Java program it will create
-a local environment that will execute your program on your local machine. If
-you created a JAR file from your program, and invoke it through the [command line](cli.html)
-or the [web interface](web_client.html),
-the Flink cluster manager will execute your main method and `getExecutionEnvironment()` will return
-an execution environment for executing your program on a cluster.
-
-For specifying data sources the execution environment has several methods
-to read from files, sockets, and external systems using various methods. To just read
-data from a socket (useful also for debugging), you can use:
-
-{% highlight scala %}
-StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment
-
-DataStream<String> lines = env.socketTextStream("localhost", 9999)
-{% endhighlight %}
-
-This will give you a DataStream on which you can then apply transformations. For
-more information on data sources and input formats, please refer to
-[Data Sources](#data-sources).
-
-Once you have a DataStream you can apply transformations to create a new
-DataStream which you can then write to a file, transform again,
-combine with other DataStreams, or push to an external system.
-You apply transformations by calling
-methods on DataStream with your own custom transformation function. For example,
-a map transformation looks like this:
-
-{% highlight scala %}
-val input: DataStream[String] = ...
-
-val mapped = input.map { x => x.toInt }
-{% endhighlight %}
-
-This will create a new DataStream by converting every String in the original
-set to an Integer. For more information and a list of all the transformations,
-please refer to [Transformations](#transformations).
-
-Once you have a DataStream containing your final results, you can push the result
-to an external system (HDFS, Kafka, Elasticsearch), write it to a socket, write to a file,
-or print it.
-
-{% highlight scala %}
-writeAsText(path: String, ...)
-writeAsCsv(path: String, ...)
-writeToSocket(hostname: String, port: Int, ...)
-
-print()
-
-addSink(...)
-{% endhighlight %}
-
-Once you specified the complete program you need to **trigger the program execution** by
-calling `execute` on `StreamExecutionEnvironment`. This will either execute on
-the local machine or submit the program for execution on a cluster, depending on the chosen execution environment.
-
-{% highlight scala %}
-env.execute()
-{% endhighlight %}
-
-</div>
-</div>
-
-{% top %}
-
-DataStream Abstraction
-----------------------
-
-A `DataStream` is a possibly unbounded immutable collection of data items of a the same type.
-
-Transformations may return different subtypes of `DataStream` allowing specialized transformations.
-For example the `keyBy(…)` method returns a `KeyedDataStream` which is a stream of data that
-is logically partitioned by a certain key, and can be further windowed.
-
-{% top %}
-
-Lazy Evaluation
----------------
-
-All Flink DataStream programs are executed lazily: When the program's main method is executed, the data loading
-and transformations do not happen directly. Rather, each operation is created and added to the
-program's plan. The operations are actually executed when the execution is explicitly triggered by
-an `execute()` call on the `StreamExecutionEnvironment` object. Whether the program is executed locally
-or on a cluster depends on the type of `StreamExecutionEnvironment`.
-
-The lazy evaluation lets you construct sophisticated programs that Flink executes as one
-holistically planned unit.
-
-{% top %}
-
-
-Transformations
----------------
+DataStream Transformations
+--------------------------
 
 Data transformations transform one or more DataStreams into a new DataStream. Programs can combine
 multiple transformations into sophisticated topologies.
@@ -583,9 +291,9 @@ keyedStream.maxBy("key");
           <td>
             <p>Windows can be defined on already partitioned KeyedStreams. Windows group the data in each
             key according to some characteristic (e.g., the data that arrived within the last 5 seconds).
-            See <a href="#windows">windows</a> for a complete description of windows.
+            See <a href="windows.html">windows</a> for a complete description of windows.
     {% highlight java %}
-dataStream.keyBy(0).window(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS))); // Last 5 seconds of data
+dataStream.keyBy(0).window(TumblingEventTimeWindows.of(Time.seconds(5))); // Last 5 seconds of data
     {% endhighlight %}
         </p>
           </td>
@@ -595,11 +303,11 @@ dataStream.keyBy(0).window(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS)))
           <td>
               <p>Windows can be defined on regular DataStreams. Windows group all the stream events
               according to some characteristic (e.g., the data that arrived within the last 5 seconds).
-              See <a href="#windows">windows</a> for a complete description of windows.</p>
+              See <a href="windows.html">windows</a> for a complete description of windows.</p>
               <p><strong>WARNING:</strong> This is in many cases a <strong>non-parallel</strong> transformation. All records will be
                gathered in one task for the windowAll operator.</p>
   {% highlight java %}
-dataStream.windowAll(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS))); // Last 5 seconds of data
+dataStream.windowAll(TumblingEventTimeWindows.of(Time.seconds(5))); // Last 5 seconds of data
   {% endhighlight %}
           </td>
         </tr>
@@ -702,7 +410,7 @@ dataStream.union(otherStream1, otherStream2, ...);
     {% highlight java %}
 dataStream.join(otherStream)
     .where(0).equalTo(1)
-    .window(TumblingTimeWindows.of(Time.of(3, TimeUnit.SECONDS)))
+    .window(TumblingEventTimeWindows.of(Time.seconds(3)))
     .apply (new JoinFunction () {...});
     {% endhighlight %}
           </td>
@@ -714,7 +422,7 @@ dataStream.join(otherStream)
     {% highlight java %}
 dataStream.coGroup(otherStream)
     .where(0).equalTo(1)
-    .window(TumblingTimeWindows.of(Time.of(3, TimeUnit.SECONDS)))
+    .window(TumblingEventTimeWindows.of(Time.seconds(3)))
     .apply (new CoGroupFunction () {...});
     {% endhighlight %}
           </td>
@@ -837,7 +545,7 @@ DataStream<Long> output = iterationBody.filter(new FilterFunction<Long>(){
           <td>
             <p>
                 Extracts timestamps from records in order to work with windows
-                that use event time semantics. See <a href="#working-with-time">working with time</a>.
+                that use event time semantics. See <a href="{{ site.baseurl }}/apis/streaming/time.html">working with time</a>.
                 {% highlight java %}
 stream.assignTimestamps (new TimeStampExtractor() {...});
                 {% endhighlight %}
@@ -929,7 +637,7 @@ keyedStream.reduce { _ + _ }
           emits the sequence "start-1", "start-1-2", "start-1-2-3", ...</p>
           {% highlight scala %}
 val result: DataStream[String] =
-    keyedStream.fold("start", (str, i) => { str + "-" + i })
+    keyedStream.fold("start")((str, i) => { str + "-" + i })
           {% endhighlight %}
           </p>
           </td>
@@ -959,9 +667,9 @@ keyedStream.maxBy("key")
           <td>
             <p>Windows can be defined on already partitioned KeyedStreams. Windows group the data in each
             key according to some characteristic (e.g., the data that arrived within the last 5 seconds).
-            See <a href="#windows">windows</a> for a description of windows.
+            See <a href="windows.html">windows</a> for a description of windows.
     {% highlight scala %}
-dataStream.keyBy(0).window(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS))) // Last 5 seconds of data
+dataStream.keyBy(0).window(TumblingEventTimeWindows.of(Time.seconds(5))) // Last 5 seconds of data
     {% endhighlight %}
         </p>
           </td>
@@ -971,11 +679,11 @@ dataStream.keyBy(0).window(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS)))
           <td>
               <p>Windows can be defined on regular DataStreams. Windows group all the stream events
               according to some characteristic (e.g., the data that arrived within the last 5 seconds).
-              See <a href="#windows">windows</a> for a complete description of windows.</p>
+              See <a href="windows.html">windows</a> for a complete description of windows.</p>
               <p><strong>WARNING:</strong> This is in many cases a <strong>non-parallel</strong> transformation. All records will be
                gathered in one task for the windowAll operator.</p>
   {% highlight scala %}
-dataStream.windowAll(TumblingTimeWindows.of(Time.of(5, TimeUnit.SECONDS))) // Last 5 seconds of data
+dataStream.windowAll(TumblingEventTimeWindows.of(Time.seconds(5))) // Last 5 seconds of data
   {% endhighlight %}
           </td>
         </tr>
@@ -1051,7 +759,7 @@ dataStream.union(otherStream1, otherStream2, ...)
     {% highlight scala %}
 dataStream.join(otherStream)
     .where(0).equalTo(1)
-    .window(TumblingTimeWindows.of(Time.of(3, TimeUnit.SECONDS)))
+    .window(TumblingEventTimeWindows.of(Time.seconds(3)))
     .apply { ... }
     {% endhighlight %}
           </td>
@@ -1063,7 +771,7 @@ dataStream.join(otherStream)
     {% highlight scala %}
 dataStream.coGroup(otherStream)
     .where(0).equalTo(1)
-    .window(TumblingTimeWindows.of(Time.of(3, TimeUnit.SECONDS)))
+    .window(TumblingEventTimeWindows.of(Time.seconds(3)))
     .apply {}
     {% endhighlight %}
           </td>
@@ -1139,16 +847,12 @@ val all = split.select("even","odd")
 		to the feedback channel, and the rest of the elements are forwarded downstream.
 		See <a href="#iterations">iterations</a> for a complete description.
                 {% highlight java %}
-initialStream. iterate {
+initialStream.iterate {
   iteration => {
     val iterationBody = iteration.map {/*do something*/}
     (iterationBody.filter(_ > 0), iterationBody.filter(_ <= 0))
   }
 }
-IterativeStream<Long> iteration = initialStream.iterate();
-DataStream<Long> iterationBody = iteration.map (/*do something*/);
-DataStream<Long> feedback = iterationBody.filter ( _ > 0);
-iteration.closeWith(feedback);
                 {% endhighlight %}
             </p>
           </td>
@@ -1159,7 +863,7 @@ iteration.closeWith(feedback);
             <p>
                 Extracts timestamps from records in order to work with windows
                 that use event time semantics.
-                See <a href="#working-with-time">working with time</a>.
+                See <a href="{{ site.baseurl }}/apis/streaming/time.html">working with time</a>.
                 {% highlight scala %}
 stream.assignTimestamps { timestampExtractor }
                 {% endhighlight %}
@@ -1168,6 +872,16 @@ stream.assignTimestamps { timestampExtractor }
         </tr>
   </tbody>
 </table>
+
+Extraction from tuples, case classes and collections via anonymous pattern matching, like the following:
+{% highlight scala %}
+val data: DataStream[(Int, String, Double)] = // [...]
+data.map {
+  case (id, name, temperature) => // [...]
+}
+{% endhighlight %}
+is not supported by the API out-of-the-box. To use this feature, you should use a <a href="../scala_api_extensions.html">Scala API extension</a>.
+
 
 </div>
 </div>
@@ -1253,25 +967,13 @@ via the following functions.
   </thead>
   <tbody>
    <tr>
-      <td><strong>Hash partitioning</strong><br>DataStream &rarr; DataStream</td>
-      <td>
-        <p>
-            Identical to keyBy but returns a DataStream instead of a KeyedStream.
-            {% highlight java %}
-dataStream.partitionByHash("someKey");
-dataStream.partitionByHash(0);
-            {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-   <tr>
       <td><strong>Custom partitioning</strong><br>DataStream &rarr; DataStream</td>
       <td>
         <p>
             Uses a user-defined Partitioner to select the target task for each element.
             {% highlight java %}
-dataStream.partitionCustom(new Partitioner(){...}, "someKey");
-dataStream.partitionCustom(new Partitioner(){...}, 0);
+dataStream.partitionCustom(partitioner, "someKey");
+dataStream.partitionCustom(partitioner, 0);
             {% endhighlight %}
         </p>
       </td>
@@ -1282,7 +984,7 @@ dataStream.partitionCustom(new Partitioner(){...}, 0);
        <p>
             Partitions elements randomly according to a uniform distribution.
             {% highlight java %}
-dataStream.partitionRandom();
+dataStream.shuffle();
             {% endhighlight %}
        </p>
      </td>
@@ -1296,6 +998,51 @@ dataStream.partitionRandom();
             {% highlight java %}
 dataStream.rebalance();
             {% endhighlight %}
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Rescaling</strong><br>DataStream &rarr; DataStream</td>
+      <td>
+        <p>
+            Partitions elements, round-robin, to a subset of downstream operations. This is
+            useful if you want to have pipelines where you, for example, fan out from
+            each parallel instance of a source to a subset of several mappers to distribute load
+            but don't want the full rebalance that rebalance() would incur. This would require only
+            local data transfers instead of transferring data over network, depending on
+            other configuration values such as the number of slots of TaskManagers.
+        </p>
+        <p>
+            The subset of downstream operations to which the upstream operation sends
+            elements depends on the degree of parallelism of both the upstream and downstream operation.
+            For example, if the upstream operation has parallelism 2 and the downstream operation
+            has parallelism 4, then one upstream operation would distribute elements to two
+            downstream operations while the other upstream operation would distribute to the other
+            two downstream operations. If, on the other hand, the downstream operation has parallelism
+            2 while the upstream operation has parallelism 4 then two upstream operations would
+            distribute to one downstream operation while the other two upstream operations would
+            distribute to the other downstream operations.
+        </p>
+        <p>
+            In cases where the different parallelisms are not multiples of each other one or several
+            downstream operations will have a differing number of inputs from upstream operations.
+
+        </p>
+        </p>
+            Please see this figure for a visualization of the connection pattern in the above
+            example:
+        </p>
+
+        <div style="text-align: center">
+            <img src="{{ site.baseurl }}/apis/streaming/fig/rescale.svg" alt="Checkpoint barriers in data streams" />
+            </div>
+
+
+        <p>
+                    {% highlight java %}
+dataStream.rescale();
+            {% endhighlight %}
+
         </p>
       </td>
     </tr>
@@ -1328,18 +1075,6 @@ dataStream.broadcast();
   </thead>
   <tbody>
    <tr>
-      <td><strong>Hash partitioning</strong><br>DataStream &rarr; DataStream</td>
-      <td>
-        <p>
-            Identical to keyBy but returns a DataStream instead of a KeyedStream.
-            {% highlight scala %}
-dataStream.partitionByHash("someKey")
-dataStream.partitionByHash(0)
-            {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-   <tr>
       <td><strong>Custom partitioning</strong><br>DataStream &rarr; DataStream</td>
       <td>
         <p>
@@ -1357,7 +1092,7 @@ dataStream.partitionCustom(partitioner, 0)
        <p>
             Partitions elements randomly according to a uniform distribution.
             {% highlight scala %}
-dataStream.partitionRandom()
+dataStream.shuffle()
             {% endhighlight %}
        </p>
      </td>
@@ -1371,6 +1106,51 @@ dataStream.partitionRandom()
             {% highlight scala %}
 dataStream.rebalance()
             {% endhighlight %}
+        </p>
+      </td>
+    </tr>
+    <tr>
+      <td><strong>Rescaling</strong><br>DataStream &rarr; DataStream</td>
+      <td>
+        <p>
+            Partitions elements, round-robin, to a subset of downstream operations. This is
+            useful if you want to have pipelines where you, for example, fan out from
+            each parallel instance of a source to a subset of several mappers to distribute load
+            but don't want the full rebalance that rebalance() would incur. This would require only
+            local data transfers instead of transferring data over network, depending on
+            other configuration values such as the number of slots of TaskManagers.
+        </p>
+        <p>
+            The subset of downstream operations to which the upstream operation sends
+            elements depends on the degree of parallelism of both the upstream and downstream operation.
+            For example, if the upstream operation has parallelism 2 and the downstream operation
+            has parallelism 4, then one upstream operation would distribute elements to two
+            downstream operations while the other upstream operation would distribute to the other
+            two downstream operations. If, on the other hand, the downstream operation has parallelism
+            2 while the upstream operation has parallelism 4 then two upstream operations would
+            distribute to one downstream operation while the other two upstream operations would
+            distribute to the other downstream operations.
+        </p>
+        <p>
+            In cases where the different parallelisms are not multiples of each other one or several
+            downstream operations will have a differing number of inputs from upstream operations.
+
+        </p>
+        </p>
+            Please see this figure for a visualization of the connection pattern in the above
+            example:
+        </p>
+
+        <div style="text-align: center">
+            <img src="{{ site.baseurl }}/apis/streaming/fig/rescale.svg" alt="Checkpoint barriers in data streams" />
+            </div>
+
+
+        <p>
+                    {% highlight java %}
+dataStream.rescale()
+            {% endhighlight %}
+
         </p>
       </td>
     </tr>
@@ -1442,22 +1222,18 @@ someStream.map(...).disableChaining();
         </p>
       </td>
     </tr>
-   <tr>
-      <td>Start a new resource group</td>
+    <tr>
+      <td>Set slot sharing group</td>
       <td>
-        <p>Start a new resource group containing the map and the subsequent operators.
+        <p>Set the slot sharing group of an operation. Flink will put operations with the same
+        slot sharing group into the same slot while keeping operations that don't have the
+        slot sharing group in other slots. This can be used to isolate slots. The slot sharing
+        group is inherited from input operations if all input operations are in the same slot
+        sharing group.
+        The name of the default slot sharing group is "default", operations can explicitly
+        be put into this group by calling slotSharingGroup("default").
 {% highlight java %}
-someStream.filter(...).startNewResourceGroup();
-{% endhighlight %}
-        </p>
-      </td>
-    </tr>
-   <tr>
-      <td>Isolate resources</td>
-      <td>
-        <p>Isolate the operator in its own slot.
-{% highlight java %}
-someStream.map(...).isolateResources();
+someStream.filter(...).slotSharingGroup("name");
 {% endhighlight %}
         </p>
       </td>
@@ -1501,22 +1277,18 @@ someStream.map(...).disableChaining()
         </p>
       </td>
     </tr>
-   <tr>
-      <td>Start a new resource group</td>
+  <tr>
+      <td>Set slot sharing group</td>
       <td>
-        <p>Start a new resource group containing the map and the subsequent operators.
-{% highlight scala %}
-someStream.filter(...).startNewResourceGroup()
-{% endhighlight %}
-        </p>
-      </td>
-    </tr>
-   <tr>
-      <td>Isolate resources</td>
-      <td>
-        <p>Isolate the operator in its own slot.
-{% highlight scala %}
-someStream.map(...).isolateResources()
+        <p>Set the slot sharing group of an operation. Flink will put operations with the same
+        slot sharing group into the same slot while keeping operations that don't have the
+        slot sharing group in other slots. This can be used to isolate slots. The slot sharing
+        group is inherited from input operations if all input operations are in the same slot
+        sharing group.
+        The name of the default slot sharing group is "default", operations can explicitly
+        be put into this group by calling slotSharingGroup("default").
+{% highlight java %}
+someStream.filter(...).slotSharingGroup("name")
 {% endhighlight %}
         </p>
       </td>
@@ -1529,53 +1301,6 @@ someStream.map(...).isolateResources()
 
 
 {% top %}
-
-Specifying Keys
-----------------
-
-The `keyBy` transformation requires that a key is defined on
-its argument DataStream.
-
-A DataStream is keyed as
-{% highlight java %}
-DataStream<...> input = // [...]
-DataStream<...> windowed = input
-	.keyBy(/*define key here*/)
-	.window(/*define window here*/);
-{% endhighlight %}
-
-The data model of Flink is not based on key-value pairs. Therefore,
-you do not need to physically pack the data stream types into keys and
-values. Keys are "virtual": they are defined as functions over the
-actual data to guide the grouping operator.
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#specifying-keys) on how to specify keys.
-Just replace `DataSet` with `DataStream`, and `groupBy` with `keyBy`.
-
-
-
-Passing Functions to Flink
---------------------------
-
-Some transformations take user-defined functions as arguments.
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#passing-functions-to-flink).
-
-
-{% top %}
-
-
-Data Types
-----------
-
-Flink places some restrictions on the type of elements that are used in DataStreams and in results
-of transformations. The reason for this is that the system analyzes the types to determine
-efficient execution strategies.
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#data-types).
-
-{% top %}
-
 
 Data Sources
 ------------
@@ -1596,12 +1321,7 @@ File-based:
 
 - `readTextFile(path)` / `TextInputFormat` - Reads files line wise and returns them as Strings.
 
-- `readTextFileWithValue(path)` / `TextValueInputFormat` - Reads files line wise and returns them as
-  StringValues. StringValues are mutable strings.
-
 - `readFile(path)` / Any input format - Reads files as dictated by the input format.
-
-- `readFileOfPrimitives(path, Class)` / `PrimitiveInputFormat` - Parses files of new-line (or another char sequence) delimited primitive data types such as `String` or `Integer`.
 
 - `readFileStream` - create a stream by appending elements when there are changes to a file
 
@@ -1648,12 +1368,7 @@ File-based:
 
 - `readTextFile(path)` / `TextInputFormat` - Reads files line wise and returns them as Strings.
 
-- `readTextFileWithValue(path)` / `TextValueInputFormat` - Reads files line wise and returns them as
-  StringValues. StringValues are mutable strings.
-
 - `readFile(path)` / Any input format - Reads files as dictated by the input format.
-
-- `readFileOfPrimitives(path, Class)` / `PrimitiveInputFormat` - Parses files of new-line (or another char sequence) delimited primitive data types such as `String` or `Integer`.
 
 - `readFileStream` - create a stream by appending elements when there are changes to a file
 
@@ -1688,24 +1403,6 @@ Custom:
 
 {% top %}
 
-
-Execution Configuration
-----------
-
-The `StreamExecutionEnvironment` also contains the `ExecutionConfig` which allows to set job specific configuration values for the runtime.
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#execution-configuration).
-
-Parameters in the `ExecutionConfig` that pertain specifically to the DataStream API are:
-
-- `enableTimestamps()` / **`disableTimestamps()`**: Attach a timestamp to each event emitted from a source.
-    `areTimestampsEnabled()` returns the current value.
-
-- `setAutoWatermarkInterval(long milliseconds)`: Set the interval for automatic watermark emission. You can
-    get the current value with `long getAutoWatermarkInterval()`
-
-{% top %}
-
 Data Sinks
 ----------
 
@@ -1729,7 +1426,7 @@ of each element on the standard out / strandard error stream. Optionally, a pref
 prepended to the output. This can help to distinguish between different calls to *print*. If the parallelism is
 greater than 1, the output will also be prepended with the identifier of the task which produced the output.
 
-- `write()` / `FileOutputFormat` - Method and base class for custom file outputs. Supports
+- `writeUsingOutputFormat()` / `FileOutputFormat` - Method and base class for custom file outputs. Supports
   custom object-to-bytes conversion.
 
 - `writeToSocket` - Writes elements to a socket according to a `SerializationSchema`
@@ -1757,7 +1454,7 @@ of each element on the standard out / strandard error stream. Optionally, a pref
 prepended to the output. This can help to distinguish between different calls to *print*. If the parallelism is
 greater than 1, the output will also be prepended with the identifier of the task which produced the output.
 
-- `write()` / `FileOutputFormat` - Method and base class for custom file outputs. Supports
+- `writeUsingOutputFormat()` / `FileOutputFormat` - Method and base class for custom file outputs. Supports
   custom object-to-bytes conversion.
 
 - `writeToSocket` - Writes elements to a socket according to a `SerializationSchema`
@@ -1768,6 +1465,184 @@ greater than 1, the output will also be prepended with the identifier of the tas
 </div>
 </div>
 
+Note that the `write*()` methods on `DataStream` are mainly intended for debugging purposes.
+They are not participating in Flink's checkpointing, this means these functions usually have
+at-least-once semantics. The data flushing to the target system depends on the implementation of the
+OutputFormat. This means that not all elements send to the OutputFormat are immediately showing up
+in the target system. Also, in failure cases, those records might be lost.
+
+For reliable, exactly-once delivery of a stream into a file system, use the `flink-connector-filesystem`.
+Also, custom implementations through the `.addSink(...)` method can partiticpate in Flink's checkpointing
+for exactly-once semantics.
+
+{% top %}
+
+Iterations
+----------
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+
+<br />
+
+Iterative streaming programs implement a step function and embed it into an `IterativeStream`. As a DataStream
+program may never finish, there is no maximum number of iterations. Instead, you need to specify which part
+of the stream is fed back to the iteration and which part is forwarded downstream using a `split` transformation
+or a `filter`. Here, we show an example using filters. First, we define an `IterativeStream`
+
+{% highlight java %}
+IterativeStream<Integer> iteration = input.iterate();
+{% endhighlight %}
+
+Then, we specify the logic that will be executed inside the loop using a series of trasformations (here
+a simple `map` transformation)
+
+{% highlight java %}
+DataStream<Integer> iterationBody = iteration.map(/* this is executed many times */);
+{% endhighlight %}
+
+To close an iteration and define the iteration tail, call the `closeWith(feedbackStream)` method of the `IterativeStream`.
+The DataStream given to the `closeWith` function will be fed back to the iteration head.
+A common pattern is to use a filter to separate the part of the stream that is fed back,
+and the part of the stream which is propagated forward. These filters can, e.g., define
+the "termination" logic, where an element is allowed to propagate downstream rather
+than being fed back.
+
+{% highlight java %}
+iteration.closeWith(iterationBody.filter(/* one part of the stream */));
+DataStream<Integer> output = iterationBody.filter(/* some other part of the stream */);
+{% endhighlight %}
+
+By default the partitioning of the feedback stream will be automatically set to be the same as the input of the
+iteration head. To override this the user can set an optional boolean flag in the `closeWith` method.
+
+For example, here is program that continuously subtracts 1 from a series of integers until they reach zero:
+
+{% highlight java %}
+DataStream<Long> someIntegers = env.generateSequence(0, 1000);
+
+IterativeStream<Long> iteration = someIntegers.iterate();
+
+DataStream<Long> minusOne = iteration.map(new MapFunction<Long, Long>() {
+  @Override
+  public Long map(Long value) throws Exception {
+    return value - 1 ;
+  }
+});
+
+DataStream<Long> stillGreaterThanZero = minusOne.filter(new FilterFunction<Long>() {
+  @Override
+  public boolean filter(Long value) throws Exception {
+    return (value > 0);
+  }
+});
+
+iteration.closeWith(stillGreaterThanZero);
+
+DataStream<Long> lessThanZero = minusOne.filter(new FilterFunction<Long>() {
+  @Override
+  public boolean filter(Long value) throws Exception {
+    return (value <= 0);
+  }
+});
+{% endhighlight %}
+</div>
+<div data-lang="scala" markdown="1">
+
+<br />
+
+Iterative streaming programs implement a step function and embed it into an `IterativeStream`. As a DataStream
+program may never finish, there is no maximum number of iterations. Instead, you need to specify which part
+of the stream is fed back to the iteration and which part is forwarded downstream using a `split` transformation
+or a `filter`. Here, we show an example iteration where the body (the part of the computation that is repeated)
+is a simple map transformation, and the elements that are fed back are distinguished by the elements that
+are forwarded downstream using filters.
+
+{% highlight scala %}
+val iteratedStream = someDataStream.iterate(
+  iteration => {
+    val iterationBody = iteration.map(/* this is executed many times */)
+    (tail.filter(/* one part of the stream */), tail.filter(/* some other part of the stream */))
+})
+{% endhighlight %}
+
+
+By default the partitioning of the feedback stream will be automatically set to be the same as the input of the
+iteration head. To override this the user can set an optional boolean flag in the `closeWith` method.
+
+For example, here is program that continuously subtracts 1 from a series of integers until they reach zero:
+
+{% highlight scala %}
+val someIntegers: DataStream[Long] = env.generateSequence(0, 1000)
+
+val iteratedStream = someIntegers.iterate(
+  iteration => {
+    val minusOne = iteration.map( v => v - 1)
+    val stillGreaterThanZero = minusOne.filter (_ > 0)
+    val lessThanZero = minusOne.filter(_ <= 0)
+    (stillGreaterThanZero, lessThanZero)
+  }
+)
+{% endhighlight %}
+
+</div>
+</div>
+
+{% top %}
+
+Execution Parameters
+--------------------
+
+The `StreamExecutionEnvironment` contains the `ExecutionConfig` which allows to set job specific configuration values for the runtime.
+
+Please refer to [execution configuration]({{ site.baseurl }}/apis/common/index.html#execution-configuration)
+for an explanation of most parameters. These parameters pertain specifically to the DataStream API:
+
+- `enableTimestamps()` / **`disableTimestamps()`**: Attach a timestamp to each event emitted from a source.
+    `areTimestampsEnabled()` returns the current value.
+
+- `setAutoWatermarkInterval(long milliseconds)`: Set the interval for automatic watermark emission. You can
+    get the current value with `long getAutoWatermarkInterval()`
+
+{% top %}
+
+### Fault Tolerance
+
+The [Fault Tolerance Documentation](fault_tolerance.html) describes the options and parameters to enable and configure Flink's checkpointing mechanism.
+
+### Controlling Latency
+
+By default, elements are not transferred on the network one-by-one (which would cause unnecessary network traffic)
+but are buffered. The size of the buffers (which are actually transferred between machines) can be set in the Flink config files.
+While this method is good for optimizing throughput, it can cause latency issues when the incoming stream is not fast enough.
+To control throughput and latency, you can use `env.setBufferTimeout(timeoutMillis)` on the execution environment
+(or on individual operators) to set a maximum wait time for the buffers to fill up. After this time, the
+buffers are sent automatically even if they are not full. The default value for this timeout is 100 ms.
+
+Usage:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+{% highlight java %}
+LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
+env.setBufferTimeout(timeoutMillis);
+
+env.genereateSequence(1,10).map(new MyMapper()).setBufferTimeout(timeoutMillis);
+{% endhighlight %}
+</div>
+<div data-lang="scala" markdown="1">
+{% highlight scala %}
+LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment
+env.setBufferTimeout(timeoutMillis)
+
+env.genereateSequence(1,10).map(myMap).setBufferTimeout(timeoutMillis)
+{% endhighlight %}
+</div>
+</div>
+
+To maximize throughput, set `setBufferTimeout(-1)` which will remove the timeout and buffers will only be
+flushed when they are full. To minimize latency, set the timeout to a value close to 0 (for example 5 or 10 ms).
+A buffer timeout of 0 should be avoided, because it can cause severe performance degradation.
 
 {% top %}
 
@@ -1886,1420 +1761,5 @@ val myOutput: Iterator[(String, Int)] = DataStreamUtils.collect(myResult.getJava
 {% endhighlight %}
 </div>
 </div>
-
-
-{% top %}
-
-
-Windows
--------
-
-### Working with Time
-
-Windows are typically groups of events within a certain time period. Reasoning about time and windows assumes
-a definition of time. Flink has support for three kinds of time:
-
-- *Processing time:* Processing time is simply the wall clock time of the machine that happens to be
-    executing the transformation. Processing time is the simplest notion of time and provides the best
-    performance. However, in distributed and asynchronous environments processing time does not provide
-    determinism.
-
-- *Event time:* Event time is the time that each individual event occurred. This time is
-    typically embedded within the records before they enter Flink or can be extracted from their contents.
-    When using event time, out-of-order events can be properly handled. For example, an event with a lower
-    timestamp may arrive after an event with a higher timestamp, but transformations will handle these events
-    correctly. Event time processing provides predictable results, but incurs more latency, as out-of-order
-    events need to be buffered
-
-- *Ingestion time:* Ingestion time is the time that events enter Flink. In particular, the timestamp of
-    an event is assigned by the source operator as the current wall clock time of the machine that executes
-    the source task at the time the records enter the Flink source. Ingestion time is more predictable
-    than processing time, and gives lower latencies than event time as the latency does not depend on
-    external systems. Ingestion time provides thus a middle ground between processing time and event time.
-    Ingestion time is a special case of event time (and indeed, it is treated by Flink identically to
-    event time).
-
-When dealing with event time, transformations need to avoid indefinite
-wait times for events to arrive. *Watermarks* provide the mechanism to control the event time-processing time skew. Watermarks
-are emitted by the sources. A watermark with a certain timestamp denotes the knowledge that no event
-with timestamp lower than the timestamp of the watermark will ever arrive.
-
-You can specify the semantics of time in a Flink DataStream program using `StreamExecutionEnviroment`, as
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime);
-env.setStreamTimeCharacteristic(TimeCharacteristic.IngestionTime);
-env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight java %}
-env.setStreamTimeCharacteristic(TimeCharacteristic.ProcessingTime)
-env.setStreamTimeCharacteristic(TimeCharacteristic.IngestionTime)
-env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)
-{% endhighlight %}
-</div>
-</div>
-
-The default value is `TimeCharacteristic.ProcessingTime`, so in order to write a program with processing
-time semantics nothing needs to be specified (e.g., the first [example](#example-program) in this guide follows processing
-time semantics).
-
-In order to work with event time semantics, you need to follow four steps:
-
-- Set `env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime)`
-
-- Use `DataStream.assignTimestamps(...)` in order to tell Flink how timestamps relate to events (e.g., which
-    record field is the timestamp)
-
-- Set `enableTimestamps()`, as well the interval for watermark emission (`setAutoWatermarkInterval(long milliseconds)`)
-    in `ExecutionConfig`.
-
-For example, assume that we have a data stream of tuples, in which the first field is the timestamp (assigned
-by the system that generates these data streams), and we know that the lag between the current processing
-time and the timestamp of an event is never more than 1 second:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-DataStream<Tuple4<Long,Integer,Double,String>> stream = //...
-stream.assignTimestamps(new TimestampExtractor<Tuple4<Long,Integer,Double,String>>{
-    @Override
-    public long extractTimestamp(Tuple4<Long,Integer,Double,String> element, long currentTimestamp) {
-        return element.f0;
-    }
-
-    @Override
-    public long extractWatermark(Tuple4<Long,Integer,Double,String> element, long currentTimestamp) {
-        return element.f0 - 1000;
-    }
-
-    @Override
-    public long getCurrentWatermark() {
-        return Long.MIN_VALUE;
-    }
-});
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-val stream: DataStream[(Long,Int,Double,String)] = null;
-stream.assignTimestampts(new TimestampExtractor[(Long, Int, Double, String)] {
-  override def extractTimestamp(element: (Long, Int, Double, String), currentTimestamp: Long): Long = element._1
-
-  override def extractWatermark(element: (Long, Int, Double, String), currentTimestamp: Long): Long = element._1 - 1000
-
-  override def getCurrentWatermark: Long = Long.MinValue
-})
-{% endhighlight %}
-</div>
-</div>
-
-If you know that timestamps of events are always ascending, i.e., elements arrive in order, you can use
-the `AscendingTimestampExtractor`, and the system generates watermarks automatically:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-DataStream<Tuple4<Long,Integer,Double,String>> stream = //...
-stream.assignTimestamps(new AscendingTimestampExtractor<Tuple4<Long,Integer,Double,String>>{
-    @Override
-    public long extractAscendingTimestamp(Tuple4<Long,Integer,Double,String> element, long currentTimestamp) {
-        return element.f0;
-    }
-});
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-stream.extractAscendingTimestamp(record => record._1)
-{% endhighlight %}
-</div>
-</div>
-
-In order to write a program with ingestion time semantics, you need to
-set `env.setStreamTimeCharacteristic(TimeCharacteristic.IngestionTime)`. You can think of this setting as a
-shortcut for writing a `TimestampExtractor` which assignes timestamps to events at the sources
-based on the current source wall-clock time. Flink injects this timestamp extractor automatically.
-
-
-### Windows on Keyed Data Streams
-
-Flink offers a variety of methods for defining windows on a `KeyedStream`. All of these group elements *per key*,
-i.e., each window will contain elements with the same key value.
-
-#### Basic Window Constructs
-
-Flink offers a general window mechanism that provides flexibility, as well as a number of pre-defined windows
-for common use cases. See first if your use case can be served by the pre-defined windows below before moving
-to defining your own windows.
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-
-<br />
-
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Tumbling time window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 5 seconds, that "tumbles". This means that elements are
-          grouped according to their timestamp in groups of 5 second duration, and every element belongs to exactly one window.
-	  The notion of time is specified by the selected TimeCharacteristic (see <a href="#working-with-time">time</a>).
-    {% highlight java %}
-keyedStream.timeWindow(Time.of(5, TimeUnit.SECONDS));
-    {% endhighlight %}
-          </p>
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Sliding time window</strong><br>KeyedStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-             Defines a window of 5 seconds, that "slides" by 1 seconds. This means that elements are
-             grouped according to their timestamp in groups of 5 second duration, and elements can belong to more than
-             one window (since windows overlap by at most 4 seconds)
-             The notion of time is specified by the selected TimeCharacteristic (see <a href="#working-with-time">time</a>).
-      {% highlight java %}
-keyedStream.timeWindow(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS));
-      {% endhighlight %}
-            </p>
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Tumbling count window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 1000 elements, that "tumbles". This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element belongs to exactly one window.
-    {% highlight java %}
-keyedStream.countWindow(1000);
-    {% endhighlight %}
-        </p>
-        </td>
-      </tr>
-      <tr>
-      <td><strong>Sliding count window</strong><br>KeyedStream &rarr; WindowedStream</td>
-      <td>
-        <p>
-          Defines a window of 1000 elements, that "slides" every 100 elements. This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element can belong to more than one window (as windows overlap by at most 900 elements).
-  {% highlight java %}
-keyedStream.countWindow(1000, 100)
-  {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-
-<div data-lang="scala" markdown="1">
-
-<br />
-
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Tumbling time window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 5 seconds, that "tumbles". This means that elements are
-          grouped according to their timestamp in groups of 5 second duration, and every element belongs to exactly one window.
-          The notion of time is specified by the selected TimeCharacteristic (see <a href="#working-with-time">time</a>).
-    {% highlight scala %}
-keyedStream.timeWindow(Time.of(5, TimeUnit.SECONDS))
-    {% endhighlight %}
-          </p>
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Sliding time window</strong><br>KeyedStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-             Defines a window of 5 seconds, that "slides" by 1 seconds. This means that elements are
-             grouped according to their timestamp in groups of 5 second duration, and elements can belong to more than
-             one window (since windows overlap by at most 4 seconds)
-             The notion of time is specified by the selected TimeCharacteristic (see <a href="#working-with-time">time</a>).
-      {% highlight scala %}
-keyedStream.timeWindow(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-      {% endhighlight %}
-            </p>
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Tumbling count window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 1000 elements, that "tumbles". This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element belongs to exactly one window.
-    {% highlight scala %}
-keyedStream.countWindow(1000)
-    {% endhighlight %}
-        </p>
-        </td>
-      </tr>
-      <tr>
-      <td><strong>Sliding count window</strong><br>KeyedStream &rarr; WindowedStream</td>
-      <td>
-        <p>
-          Defines a window of 1000 elements, that "slides" every 100 elements. This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element can belong to more than one window (as windows overlap by at most 900 elements).
-  {% highlight scala %}
-keyedStream.countWindow(1000, 100)
-  {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-</div>
-
-#### Advanced Window Constructs
-
-The general mechanism can define more powerful windows at the cost of more verbose syntax. For example,
-below is a window definition where windows hold elements of the last 5 seconds and slides every 1 second,
-but the execution of the window function is triggered when 100 elements have been added to the
-window, and every time execution is triggered, 10 elements are retained in the window:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-keyedStream
-    .window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    .trigger(CountTrigger.of(100))
-    .evictor(CountEvictor.of(10));
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-keyedStream
-    .window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    .trigger(CountTrigger.of(100))
-    .evictor(CountEvictor.of(10))
-{% endhighlight %}
-</div>
-</div>
-
-The general recipe for building a custom window is to specify (1) a `WindowAssigner`, (2) a `Trigger` (optionally),
-and (3) an `Evictor` (optionally).
-
-The `WindowAssigner` defines how incoming elements are assigned to windows. A window is a logical group of elements
-that has a begin-value, and an end-value corresponding to a begin-time and end-time. Elements with timestamp (according
-to some notion of time described above within these values are part of the window).
-
-For example, the `SlidingTimeWindows`
-assigner in the code above defines a window of size 5 seconds, and a slide of 1 second. Assume that
-time starts from 0 and is measured in milliseconds. Then, we have 6 windows
-that overlap: [0,5000], [1000,6000], [2000,7000], [3000, 8000], [4000, 9000], and [5000, 10000]. Each incoming
-element is assigned to the windows according to its timestamp. For example, an element with timestamp 2000 will be
-assigned to the first three windows. Flink comes bundled with window assigners that cover the most common use cases. You can write your
-own window types by extending the `WindowAssigner` class.
-
-<div class="codetabs" markdown="1">
-
-<div data-lang="java" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Global window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-	    All incoming elements of a given key are assigned to the same window.
-	    The window does not contain a default trigger, hence it will never be triggered
-	    if a trigger is not explicitly specified.
-          </p>
-    {% highlight java %}
-stream.window(GlobalWindows.create());
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Tumbling time windows</strong><br>KeyedStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-              Incoming elements are assigned to a window of a certain size (1 second below) based on
-              their timestamp. Windows do not overlap, i.e., each element is assigned to exactly one window.
-	      The notion of time is picked from the specified TimeCharacteristic (see <a href="#working-with-time">time</a>).
-	      The window comes with a default trigger. For event/ingestion time, a window is triggered when a
-	      watermark with value higher than its end-value is received, whereas for processing time
-	      when the current processing time exceeds its current end value.
-            </p>
-      {% highlight java %}
-stream.window(TumblingTimeWindows.of(Time.of(1, TimeUnit.SECONDS)));
-      {% endhighlight %}
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Sliding time windows</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-            Incoming elements are assigned to a window of a certain size (5 seconds below) based on
-            their timestamp. Windows "slide" by the provided value (1 second in the example), and hence
-            overlap. The window comes with a default trigger. For event/ingestion time, a window is triggered when a
-	    watermark with value higher than its end-value is received, whereas for processing time
-	    when the current processing time exceeds its current end value.
-          </p>
-    {% highlight java %}
-stream.window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS)));
-    {% endhighlight %}
-        </td>
-      </tr>
-  </tbody>
-</table>
-</div>
-
-<div data-lang="scala" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Global window</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-            All incoming elements of a given key are assigned to the same window.
-	    The window does not contain a default trigger, hence it will never be triggered
-	    if a trigger is not explicitly specified.
-          </p>
-    {% highlight scala %}
-stream.window(GlobalWindows.create)
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Tumbling time windows</strong><br>KeyedStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-              Incoming elements are assigned to a window of a certain size (1 second below) based on
-              their timestamp. Windows do not overlap, i.e., each element is assigned to exactly one window.
-	      The notion of time is specified by the selected TimeCharacteristic (see <a href="#working-with-time">time</a>).
-	      The window comes with a default trigger. For event/ingestion time, a window is triggered when a
-	      watermark with value higher than its end-value is received, whereas for processing time
-	      when the current processing time exceeds its current end value.
-            </p>
-      {% highlight scala %}
-stream.window(TumblingTimeWindows.of(Time.of(1, TimeUnit.SECONDS)))
-      {% endhighlight %}
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Sliding time windows</strong><br>KeyedStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-            Incoming elements are assigned to a window of a certain size (5 seconds below) based on
-            their timestamp. Windows "slide" by the provided value (1 second in the example), and hence
-            overlap. The window comes with a default trigger. For event/ingestion time, a window is triggered when a
-	    watermark with value higher than its end-value is received, whereas for processing time
-	    when the current processing time exceeds its current end value.
-          </p>
-    {% highlight scala %}
-stream.window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS)))
-    {% endhighlight %}
-        </td>
-      </tr>
-  </tbody>
-</table>
-</div>
-
-</div>
-
-The `Trigger` specifies when the function that comes after the window clause (e.g., `sum`, `count`) is evaluated ("fires")
-for each window. If a trigger is not specified, a default trigger for each window type is used (that is part of the
-definition of the `WindowAssigner`). Flink comes bundled with a set of triggers if the ones that windows use by
-default do not fit the application. You can write your own trigger by implementing the `Trigger` interface. Note that
-specifying a trigger will override the default trigger of the window assigner.
-
-<div class="codetabs" markdown="1">
-
-<div data-lang="java" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-  <tr>
-    <td><strong>Processing time trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when the current processing time exceeds its end-value.
-        The elements on the triggered window are henceforth discarded.
-      </p>
-{% highlight java %}
-windowedStream.trigger(ProcessingTimeTrigger.create());
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Watermark trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when a watermark with value that exceeds the window's end-value has been received.
-        The elements on the triggered window are henceforth discarded.
-      </p>
-{% highlight java %}
-windowedStream.trigger(EventTimeTrigger.create());
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Continuous processing time trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5 seconds in the example).
-        The window is actually fired only when the current processing time exceeds its end-value.
-        The elements on the triggered window are retained.
-      </p>
-{% highlight java %}
-windowedStream.trigger(ContinuousProcessingTimeTrigger.of(Time.of(5, TimeUnit.SECONDS)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Continuous watermark time trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5 seconds in the example).
-        A window is actually fired when a watermark with value that exceeds the window's end-value has been received.
-        The elements on the triggered window are retained.
-      </p>
-{% highlight java %}
-windowedStream.trigger(ContinuousEventTimeTrigger.of(Time.of(5, TimeUnit.SECONDS)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Count trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when it has more than a certain number of elements (1000 below).
-        The elements of the triggered window are retained.
-      </p>
-{% highlight java %}
-windowedStream.trigger(CountTrigger.of(1000));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Purging trigger</strong></td>
-    <td>
-      <p>
-        Takes any trigger as an argument and forces the triggered window elements to be
-        "purged" (discarded) after triggering.
-      </p>
-{% highlight java %}
-windowedStream.trigger(PurgingTrigger.of(CountTrigger.of(1000)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Delta trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5000 milliseconds in the example).
-        A window is actually fired when the value of the last added element exceeds the value of
-        the first element inserted in the window according to a `DeltaFunction`.
-      </p>
-{% highlight java %}
-windowedStream.trigger(new DeltaTrigger.of(5000.0, new DeltaFunction<Double>() {
-    @Override
-    public double getDelta (Double old, Double new) {
-        return (new - old > 0.01);
-    }
-}));
-{% endhighlight %}
-    </td>
-  </tr>
- </tbody>
-</table>
-</div>
-
-
-<div data-lang="scala" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-  <tr>
-    <td><strong>Processing time trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when the current processing time exceeds its end-value.
-        The elements on the triggered window are henceforth discarded.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(ProcessingTimeTrigger.create);
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Watermark trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when a watermark with value that exceeds the window's end-value has been received.
-        The elements on the triggered window are henceforth discarded.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(EventTimeTrigger.create);
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Continuous processing time trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5 seconds in the example).
-        The window is actually fired only when the current processing time exceeds its end-value.
-        The elements on the triggered window are retained.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(ContinuousProcessingTimeTrigger.of(Time.of(5, TimeUnit.SECONDS)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Continuous watermark time trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5 seconds in the example).
-        A window is actually fired when a watermark with value that exceeds the window's end-value has been received.
-        The elements on the triggered window are retained.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(ContinuousEventTimeTrigger.of(Time.of(5, TimeUnit.SECONDS)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Count trigger</strong></td>
-    <td>
-      <p>
-        A window is fired when it has more than a certain number of elements (1000 below).
-        The elements of the triggered window are retained.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(CountTrigger.of(1000));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Purging trigger</strong></td>
-    <td>
-      <p>
-        Takes any trigger as an argument and forces the triggered window elements to be
-        "purged" (discarded) after triggering.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(PurgingTrigger.of(CountTrigger.of(1000)));
-{% endhighlight %}
-    </td>
-  </tr>
-  <tr>
-    <td><strong>Delta trigger</strong></td>
-    <td>
-      <p>
-        A window is periodically considered for being fired (every 5000 milliseconds in the example).
-        A window is actually fired when the value of the last added element exceeds the value of
-        the first element inserted in the window according to a `DeltaFunction`.
-      </p>
-{% highlight scala %}
-windowedStream.trigger(DeltaTrigger.of(5000.0, { (old,new) => new - old > 0.01 }))
-{% endhighlight %}
-    </td>
-  </tr>
- </tbody>
-</table>
-</div>
-
-</div>
-
-After the trigger fires, and before the function (e.g., `sum`, `count`) is applied to the window contents, an
-optional `Evictor` removes some elements from the beginning of the window before the remaining elements
-are passed on to the function. Flink comes bundled with a set of evictors You can write your own evictor by
-implementing the `Evictor` interface.
-
-<div class="codetabs" markdown="1">
-
-<div data-lang="java" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-  <tr>
-      <td><strong>Time evictor</strong></td>
-      <td>
-        <p>
-         Evict all elements from the beginning of the window, so that elements from end-value - 1 second
-         until end-value are retained (the resulting window size is 1 second).
-        </p>
-  {% highlight java %}
-triggeredStream.evictor(TimeEvictor.of(Time.of(1, TimeUnit.SECONDS)));
-  {% endhighlight %}
-      </td>
-    </tr>
-   <tr>
-       <td><strong>Count evictor</strong></td>
-       <td>
-         <p>
-          Retain 1000 elements from the end of the window backwards, evicting all others.
-         </p>
-   {% highlight java %}
-triggeredStream.evictor(CountEvictor.of(1000));
-   {% endhighlight %}
-       </td>
-     </tr>
-    <tr>
-        <td><strong>Delta evictor</strong></td>
-        <td>
-          <p>
-            Starting from the beginning of the window, evict elements until an element with
-            value lower than the value of the last element is found (by a threshold and a
-            DeltaFunction).
-          </p>
-    {% highlight java %}
-triggeredStream.evictor(DeltaEvictor.of(5000, new DeltaFunction<Double>() {
-  public double (Double oldValue, Double newValue) {
-      return newValue - oldValue;
-  }
-}));
-    {% endhighlight %}
-        </td>
-      </tr>
- </tbody>
-</table>
-</div>
-
-<div data-lang="scala" markdown="1">
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-  <tr>
-      <td><strong>Time evictor</strong></td>
-      <td>
-        <p>
-         Evict all elements from the beginning of the window, so that elements from end-value - 1 second
-         until end-value are retained (the resulting window size is 1 second).
-        </p>
-  {% highlight scala %}
-triggeredStream.evictor(TimeEvictor.of(Time.of(1, TimeUnit.SECONDS)));
-  {% endhighlight %}
-      </td>
-    </tr>
-   <tr>
-       <td><strong>Count evictor</strong></td>
-       <td>
-         <p>
-          Retain 1000 elements from the end of the window backwards, evicting all others.
-         </p>
-   {% highlight scala %}
-triggeredStream.evictor(CountEvictor.of(1000));
-   {% endhighlight %}
-       </td>
-     </tr>
-    <tr>
-        <td><strong>Delta evictor</strong></td>
-        <td>
-          <p>
-            Starting from the beginning of the window, evict elements until an element with
-            value lower than the value of the last element is found (by a threshold and a
-            DeltaFunction).
-          </p>
-    {% highlight scala %}
-windowedStream.evictor(DeltaEvictor.of(5000.0, { (old,new) => new - old > 0.01 }))
-    {% endhighlight %}
-        </td>
-      </tr>
- </tbody>
-</table>
-</div>
-
-</div>
-
-#### Recipes for Building Windows
-
-The mechanism of window assigner, trigger, and evictor is very powerful, and it allows you to define
-many different kinds of windows. Flink's basic window constructs are, in fact, syntactic
-sugar on top of the general mechanism. Below is how some common types of windows can be
-constructed using the general mechanism
-
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 35%">Window type</th>
-      <th class="text-center">Definition</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td>
-	  <strong>Tumbling count window</strong><br>
-    {% highlight java %}
-stream.countWindow(1000)
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(GlobalWindows.create())
-  .trigger(CountTrigger.of(1000)
-  .evictor(CountEvictor.of(1000)))
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-        <td>
-	  <strong>Sliding count window</strong><br>
-    {% highlight java %}
-stream.countWindow(1000, 100)
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(GlobalWindows.create())
-  .evictor(CountEvictor.of(1000))
-  .trigger(CountTrigger.of(100))
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-        <td>
-	  <strong>Tumbling event time window</strong><br>
-    {% highlight java %}
-stream.timeWindow(Time.of(5, TimeUnit.SECONDS))
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(TumblingTimeWindows.of((Time.of(5, TimeUnit.SECONDS)))
-  .trigger(EventTimeTrigger.create())
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-        <td>
-	  <strong>Sliding event time window</strong><br>
-    {% highlight java %}
-stream.timeWindow(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS)))
-  .trigger(EventTimeTrigger.create())
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-        <td>
-	  <strong>Tumbling processing time window</strong><br>
-    {% highlight java %}
-stream.timeWindow(Time.of(5, TimeUnit.SECONDS))
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(TumblingTimeWindows.of((Time.of(5, TimeUnit.SECONDS)))
-  .trigger(ProcessingTimeTrigger.create())
-    {% endhighlight %}
-        </td>
-      </tr>
-      <tr>
-        <td>
-	  <strong>Sliding processing time window</strong><br>
-    {% highlight java %}
-stream.timeWindow(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    {% endhighlight %}
-	</td>
-        <td>
-    {% highlight java %}
-stream.window(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS)))
-  .trigger(ProcessingTimeTrigger.create())
-    {% endhighlight %}
-        </td>
-      </tr>
-  </tbody>
-</table>
-
-
-### Windows on Unkeyed Data Streams
-
-You can also define windows on regular (non-keyed) data streams using the `windowAll` transformation. These
-windowed data streams have all the capabilities of keyed windowed data streams, but are evaluated at a single
-task (and hence at a single computing node). The syntax for defining triggers and evictors is exactly the
-same:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-nonKeyedStream
-    .windowAll(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    .trigger(CountTrigger.of(100))
-    .evictor(CountEvictor.of(10));
-{% endhighlight %}
-</div>
-
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-nonKeyedStream
-    .windowAll(SlidingTimeWindows.of(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS))
-    .trigger(CountTrigger.of(100))
-    .evictor(CountEvictor.of(10))
-{% endhighlight %}
-</div>
-</div>
-
-Basic window definitions are also available for windows on non-keyed streams:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-
-<br />
-
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Tumbling time window all</strong><br>DataStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 5 seconds, that "tumbles". This means that elements are
-          grouped according to their timestamp in groups of 5 second duration, and every element belongs to exactly one window.
-          The notion of time used is controlled by the StreamExecutionEnvironment.
-    {% highlight java %}
-nonKeyedStream.timeWindowAll(Time.of(5, TimeUnit.SECONDS));
-    {% endhighlight %}
-          </p>
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Sliding time window all</strong><br>DataStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-             Defines a window of 5 seconds, that "slides" by 1 seconds. This means that elements are
-             grouped according to their timestamp in groups of 5 second duration, and elements can belong to more than
-             one window (since windows overlap by at least 4 seconds)
-             The notion of time used is controlled by the StreamExecutionEnvironment.
-      {% highlight java %}
-nonKeyedStream.timeWindowAll(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS));
-      {% endhighlight %}
-            </p>
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Tumbling count window all</strong><br>DataStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 1000 elements, that "tumbles". This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element belongs to exactly one window.
-    {% highlight java %}
-nonKeyedStream.countWindowAll(1000)
-    {% endhighlight %}
-        </p>
-        </td>
-      </tr>
-      <tr>
-      <td><strong>Sliding count window all</strong><br>DataStream &rarr; WindowedStream</td>
-      <td>
-        <p>
-          Defines a window of 1000 elements, that "slides" every 100 elements. This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element can belong to more than one window (as windows overlap by at least 900 elements).
-  {% highlight java %}
-nonKeyedStream.countWindowAll(1000, 100)
-  {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-
-<div data-lang="scala" markdown="1">
-
-<br />
-
-<table class="table table-bordered">
-  <thead>
-    <tr>
-      <th class="text-left" style="width: 25%">Transformation</th>
-      <th class="text-center">Description</th>
-    </tr>
-  </thead>
-  <tbody>
-      <tr>
-        <td><strong>Tumbling time window all</strong><br>DataStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 5 seconds, that "tumbles". This means that elements are
-          grouped according to their timestamp in groups of 5 second duration, and every element belongs to exactly one window.
-          The notion of time used is controlled by the StreamExecutionEnvironment.
-    {% highlight scala %}
-nonKeyedStream.timeWindowAll(Time.of(5, TimeUnit.SECONDS));
-    {% endhighlight %}
-          </p>
-        </td>
-      </tr>
-      <tr>
-          <td><strong>Sliding time window all</strong><br>DataStream &rarr; WindowedStream</td>
-          <td>
-            <p>
-             Defines a window of 5 seconds, that "slides" by 1 seconds. This means that elements are
-             grouped according to their timestamp in groups of 5 second duration, and elements can belong to more than
-             one window (since windows overlap by at least 4 seconds)
-             The notion of time used is controlled by the StreamExecutionEnvironment.
-      {% highlight scala %}
-nonKeyedStream.timeWindowAll(Time.of(5, TimeUnit.SECONDS), Time.of(1, TimeUnit.SECONDS));
-      {% endhighlight %}
-            </p>
-          </td>
-        </tr>
-      <tr>
-        <td><strong>Tumbling count window all</strong><br>DataStream &rarr; WindowedStream</td>
-        <td>
-          <p>
-          Defines a window of 1000 elements, that "tumbles". This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element belongs to exactly one window.
-    {% highlight scala %}
-nonKeyedStream.countWindowAll(1000)
-    {% endhighlight %}
-        </p>
-        </td>
-      </tr>
-      <tr>
-      <td><strong>Sliding count window all</strong><br>DataStream &rarr; WindowedStream</td>
-      <td>
-        <p>
-          Defines a window of 1000 elements, that "slides" every 100 elements. This means that elements are
-          grouped according to their arrival time (equivalent to processing time) in groups of 1000 elements,
-          and every element can belong to more than one window (as windows overlap by at least 900 elements).
-  {% highlight scala %}
-nonKeyedStream.countWindowAll(1000, 100)
-  {% endhighlight %}
-        </p>
-      </td>
-    </tr>
-  </tbody>
-</table>
-
-</div>
-</div>
-
-{% top %}
-
-Execution Parameters
---------------------
-
-### Fault Tolerance
-
-The [Fault Tolerance Documentation](fault_tolerance.html) describes the options and parameters to enable and configure Flink's checkpointing mechanism.
-
-### Parallelism
-
-You can control the number of parallel instances created for each operator by
-calling the `operator.setParallelism(int)` method.
-
-### Controlling Latency
-
-By default, elements are not transferred on the network one-by-one (which would cause unnecessary network traffic)
-but are buffered. The size of the buffers (which are actually transferred between machines) can be set in the Flink config files.
-While this method is good for optimizing throughput, it can cause latency issues when the incoming stream is not fast enough.
-To control throughput and latency, you can use `env.setBufferTimeout(timeoutMillis)` on the execution environment
-(or on individual operators) to set a maximum wait time for the buffers to fill up. After this time, the
-buffers are sent automatically even if they are not full. The default value for this timeout is 100 ms.
-
-Usage:
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-{% highlight java %}
-LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment();
-env.setBufferTimeout(timeoutMillis);
-
-env.genereateSequence(1,10).map(new MyMapper()).setBufferTimeout(timeoutMillis);
-{% endhighlight %}
-</div>
-<div data-lang="scala" markdown="1">
-{% highlight scala %}
-LocalStreamEnvironment env = StreamExecutionEnvironment.createLocalEnvironment
-env.setBufferTimeout(timeoutMillis)
-
-env.genereateSequence(1,10).map(myMap).setBufferTimeout(timeoutMillis)
-{% endhighlight %}
-</div>
-</div>
-
-To maximize throughput, set `setBufferTimeout(-1)` which will remove the timeout and buffers will only be
-flushed when they are full. To minimize latency, set the timeout to a value close to 0 (for example 5 or 10 ms).
-A buffer timeout of 0 should be avoided, because it can cause severe performance degradation.
-
-{% top %}
-
-Working with State
-------------------
-
-All transformations in Flink may look like functions (in the functional processing terminology), but
-are in fact stateful operators. You can make *every* transformation (`map`, `filter`, etc) stateful
-by declaring local variables or using Flink's state interface. You can register any local variable
-as ***managed*** state by implementing an interface. In this case, and also in the case of using
-Flink's native state interface, Flink will automatically take consistent snapshots of your state
-periodically, and restore its value in the case of a failure.
-
-The end effect is that updates to any form of state are the same under failure-free execution and
-execution under failures.
-
-First, we look at how to make local variables consistent under failures, and then we look at
-Flink's state interface.
-
-By default state checkpoints will be stored in-memory at the JobManager. For proper persistence of large
-state, Flink supports storing the checkpoints on file systems (HDFS, S3, or any mounted POSIX file system),
-which can be configured in the `flink-conf.yaml` or via `StreamExecutionEnvironment.setStateBackend(…)`.
-
-
-### Checkpointing Local Variables
-
-Local variables can be checkpointed by using the `Checkpointed` interface.
-
-When the user-defined function implements the `Checkpointed` interface, the `snapshotState(…)` and `restoreState(…)`
-methods will be executed to draw and restore function state.
-
-In addition to that, user functions can also implement the `CheckpointNotifier` interface to receive notifications on
-completed checkpoints via the `notifyCheckpointComplete(long checkpointId)` method.
-Note that there is no guarantee for the user function to receive a notification if a failure happens between
-checkpoint completion and notification. The notifications should hence be treated in a way that notifications from
-later checkpoints can subsume missing notifications.
-
-For example the same counting, reduce function shown for `OperatorState`s by using the `Checkpointed` interface instead:
-
-{% highlight java %}
-public class CounterSum extends ReduceFunction<Long>, Checkpointed<Long> {
-
-    // persistent counter
-    private long counter = 0;
-
-    @Override
-    public Long reduce(Long value1, Long value2) {
-        counter++;
-        return value1 + value2;
-    }
-
-    // regularly persists state during normal operation
-    @Override
-    public Serializable snapshotState(long checkpointId, long checkpointTimestamp) {
-        return counter;
-    }
-
-    // restores state on recovery from failure
-    @Override
-    public void restoreState(Long state) {
-        counter = state;
-    }
-}
-{% endhighlight %}
-
-### Using the Key/Value State Interface
-
-The state interface gives access to key/value states, which are a collection of key/value pairs.
-Because the state is partitioned by the keys (distributed accross workers), it can only be used
-on the `KeyedStream`, created via `stream.keyBy(…)` (which means also that it is usable in all
-types of functions on keyed windows).
-
-The handle to the state can be obtained from the function's `RuntimeContext`. The state handle will
-then give access to the value mapped under the key of the current record or window - each key consequently
-has its own value.
-
-The following code sample shows how to use the key/value state inside a reduce function.
-When creating the state handle, one needs to supply a name for that state (a function can have multiple states
-of different types), the type of the state (used to create efficient serializers), and the default value (returned
-as a value for keys that do not yet have a value associated).
-
-{% highlight java %}
-public class CounterSum extends RichReduceFunction<Long> {
-
-    /** The state handle */
-    private OperatorState<Long> counter;
-
-    @Override
-    public Long reduce(Long value1, Long value2) {
-        counter.update(counter.value() + 1);
-        return value1 + value2;
-    }
-
-    @Override
-    public void open(Configuration config) {
-        counter = getRuntimeContext().getKeyValueState("myCounter", Long.class, 0L);
-    }
-}
-{% endhighlight %}
-
-State updated by this is usually kept locally inside the flink process (unless one configures explicitly
-an external state backend). This means that lookups and updates are process local and this very fast.
-
-The important implication of having the keys set implicitly is that it forces programs to group the stream
-by key (via the `keyBy()` function), making the key partitioning transparent to Flink. That allows the system
-to efficiently restore and redistribute keys and state.
-
-The Scala API has shortcuts that for stateful `map()` or `flatMap()` functions on `KeyedStream`, which give the
-state of the current key as an option directly into the function, and return the result with a state update:
-
-{% highlight scala %}
-val stream: DataStream[(String, Int)] = ...
-
-val counts: DataStream[(String, Int)] = stream
-  .keyBy(_._1)
-  .mapWithState((in: (String, Int), count: Option[Int]) =>
-    count match {
-      case Some(c) => ( (in._1, c), Some(c + in._2) )
-      case None => ( (in._1, 0), Some(in._2) )
-    })
-{% endhighlight %}
-
-
-### Stateful Source Functions
-
-Stateful sources require a bit more care as opposed to other operators.
-In order to make the updates to the state and output collection atomic (required for exactly-once semantics
-on failure/recovery), the user is required to get a lock from the source's context.
-
-{% highlight java %}
-public static class CounterSource extends RichParallelSourceFunction<Long>, Checkpointed<Long> {
-
-    /**  current offset for exactly once semantics */
-    private long offset;
-
-    /** flag for job cancellation */
-    private volatile boolean isRunning = true;
-
-    @Override
-    public void run(SourceContext<Long> ctx) {
-        final Object lock = ctx.getCheckpointLock();
-
-        while (isRunning) {
-            // output and state update are atomic
-            synchronized (lock) {
-                ctx.collect(offset);
-                offset += 1;
-            }
-        }
-    }
-
-    @Override
-    public void cancel() {
-        isRunning = false;
-    }
-
-    @Override
-    public Long snapshotState(long checkpointId, long checkpointTimestamp) {
-        return offset;
-
-    }
-
-    @Override
-	public void restoreState(Long state) {
-        offset = state;
-    }
-}
-{% endhighlight %}
-
-Some operators might need the information when a checkpoint is fully acknowledged by Flink to communicate that with the outside world. In this case see the `flink.streaming.api.checkpoint.CheckpointNotifier` interface.
-
-### State Checkpoints in Iterative Jobs
-
-Flink currently only provides processing guarantees for jobs without iterations. Enabling checkpointing on an iterative job causes an exception. In order to force checkpointing on an iterative program the user needs to set a special flag when enabling checkpointing: `env.enableCheckpointing(interval, force = true)`.
-
-Please note that records in flight in the loop edges (and the state changes associated with them) will be lost during failure.
-
-{% top %}
-
-Iterations
-----------
-
-<div class="codetabs" markdown="1">
-<div data-lang="java" markdown="1">
-
-<br />
-
-Iterative streaming programs implement a step function and embed it into an `IterativeStream`. As a DataStream
-program may never finish, there is no maximum number of iterations. Instead, you need to specify which part
-of the stream is fed back to the iteration and which part is forwarded downstream using a `split` transformation
-or a `filter`. Here, we show an example using filters. First, we define an `IterativeStream`
-
-{% highlight java %}
-IterativeStream<Integer> iteration = input.iterate();
-{% endhighlight %}
-
-Then, we specify the logic that will be executed inside the loop using a series of trasformations (here
-a simple `map` transformation)
-
-{% highlight java %}
-DataStream<Integer> iterationBody = iteration.map(/* this is executed many times */);
-{% endhighlight %}
-
-To close an iteration and define the iteration tail, call the `closeWith(feedbackStream)` method of the `IterativeStream`.
-The DataStream given to the `closeWith` function will be fed back to the iteration head.
-A common pattern is to use a filter to separate the part of the strem that is fed back,
-and the part of the stream which is propagated forward. These filters can, e.g., define
-the "termination" logic, where an element is allowed to propagate downstream rather
-than being fed back.
-
-{% highlight java %}
-iteration.closeWith(iterationBody.filter(/* one part of the stream */));
-DataStream<Integer> output = iterationBody.filter(/* some other part of the stream */);
-{% endhighlight %}
-
-By default the partitioning of the feedback stream will be automatically set to be the same as the input of the
-iteration head. To override this the user can set an optional boolean flag in the `closeWith` method.
-
-For example, here is program that continuously subtracts 1 from a series of integers until they reach zero:
-
-{% highlight java %}
-DataStream<Long> someIntegers = env.generateSequence(0, 1000);
-
-IterativeStream<Long> iteration = someIntegers.iterate();
-
-DataStream<Long> minusOne = iteration.map(new MapFunction<Long, Long>() {
-  @Override
-  public Long map(Long value) throws Exception {
-    return value - 1 ;
-  }
-});
-
-DataStream<Long> stillGreaterThanZero = minusOne.filter(new FilterFunction<Long>() {
-  @Override
-  public boolean filter(Long value) throws Exception {
-    return (value > 0);
-  }
-});
-
-iteration.closeWith(stillGreaterThanZero);
-
-DataStream<Long> lessThanZero = minusOne.filter(new FilterFunction<Long>() {
-  @Override
-  public boolean filter(Long value) throws Exception {
-    return (value <= 0);
-  }
-});
-{% endhighlight %}
-</div>
-<div data-lang="scala" markdown="1">
-
-<br />
-
-Iterative streaming programs implement a step function and embed it into an `IterativeStream`. As a DataStream
-program may never finish, there is no maximum number of iterations. Instead, you need to specify which part
-of the stream is fed back to the iteration and which part is forwarded downstream using a `split` transformation
-or a `filter`. Here, we show an example iteration where the body (the part of the computation that is repeated)
-is a simple map transformation, and the elements that are fed back are distinguished by the elements that
-are forwarded downstream using filters.
-
-{% highlight scala %}
-val iteratedStream = someDataStream.iterate(
-  iteration => {
-    val iterationBody = iteration.map(/* this is executed many times */)
-    (tail.filter(/* one part of the stream */), tail.filter(/* some other part of the stream */))
-})
-{% endhighlight %}
-
-
-By default the partitioning of the feedback stream will be automatically set to be the same as the input of the
-iteration head. To override this the user can set an optional boolean flag in the `closeWith` method.
-
-For example, here is program that continuously subtracts 1 from a series of integers until they reach zero:
-
-{% highlight scala %}
-val someIntegers: DataStream[Long] = env.generateSequence(0, 1000)
-
-val iteratedStream = someIntegers.iterate(
-  iteration => {
-    val minusOne = iteration.map( v => v - 1)
-    val stillGreaterThanZero = minusOne.filter (_ > 0)
-    val lessThanZero = minusOne.filter(_ <= 0)
-    (stillGreaterThanZero, lessThanZero)
-  }
-)
-{% endhighlight %}
-
-</div>
-</div>
-
-{% top %}
-
-Program Packaging & Distributed Execution
------------------------------------------
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#program-packaging-and-distributed-execution).
-
-{% top %}
-
-Parallel Execution
-------------------
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#parallel-execution).
-
-{% top %}
-
-Execution Plans
----------------
-
-See [the relevant section of the DataSet API documentation]({{ site.baseurl }}/apis/batch/index.html#execution-plans).
 
 {% top %}

@@ -18,7 +18,7 @@
 
 package org.apache.flink.runtime.operators.testutils;
 
-import org.apache.flink.api.common.ApplicationID;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.UnmodifiableConfiguration;
@@ -66,6 +66,8 @@ public class MockEnvironment implements Environment {
 	
 	private final TaskInfo taskInfo;
 	
+	private final ExecutionConfig executionConfig;
+
 	private final MemoryManager memManager;
 
 	private final IOManager ioManager;
@@ -79,8 +81,6 @@ public class MockEnvironment implements Environment {
 	private final List<InputGate> inputs;
 
 	private final List<ResultPartitionWriter> outputs;
-
-	private final ApplicationID appId= new ApplicationID();
 
 	private final JobID jobID = new JobID();
 
@@ -99,6 +99,7 @@ public class MockEnvironment implements Environment {
 
 		this.memManager = new MemoryManager(memorySize, 1);
 		this.ioManager = new IOManagerAsync();
+		this.executionConfig = new ExecutionConfig();
 		this.inputSplitProvider = inputSplitProvider;
 		this.bufferSize = bufferSize;
 
@@ -189,8 +190,8 @@ public class MockEnvironment implements Environment {
 	}
 
 	@Override
-	public ApplicationID getApplicationID() {
-		return this.appId;
+	public ExecutionConfig getExecutionConfig() {
+		return this.executionConfig;
 	}
 
 	@Override

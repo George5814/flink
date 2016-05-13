@@ -25,6 +25,7 @@ import org.apache.curator.utils.ZKPaths;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.util.ZooKeeperUtils;
+import org.apache.zookeeper.KeeperException;
 
 import java.util.List;
 
@@ -137,7 +138,24 @@ public class ZooKeeperTestEnvironment {
 	 */
 	public void deleteAll() throws Exception {
 		final String path = "/" + client.getNamespace();
-		ZKPaths.deleteChildren(client.getZookeeperClient().getZooKeeper(), path, false);
+
+		int maxAttempts = 10;
+
+		for (int i = 0; i < maxAttempts; i++) {
+			try {
+				ZKPaths.deleteChildren(client.getZookeeperClient().getZooKeeper(), path, false);
+				break;
+			}
+			catch (org.apache.zookeeper.KeeperException.NoNodeException e) {
+				// that seems all right. if one of the children we want to delete is
+				// actually already deleted, that's fine.
+				break;
+			}
+			catch (KeeperException.ConnectionLossException e) {
+				// Keep retrying
+				Thread.sleep(100);
+			}
+		}
 	}
 
 }

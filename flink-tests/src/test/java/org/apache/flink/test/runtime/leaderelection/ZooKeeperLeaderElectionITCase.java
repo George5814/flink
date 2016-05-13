@@ -22,6 +22,7 @@ import akka.actor.ActorSystem;
 import akka.actor.Kill;
 import akka.actor.PoisonPill;
 import org.apache.commons.io.FileUtils;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobExecutionResult;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
@@ -148,7 +149,7 @@ public class ZooKeeperLeaderElectionITCase extends TestLogger {
 
 		// we "effectively" disable the automatic RecoverAllJobs message and sent it manually to make
 		// sure that all TMs have registered to the JM prior to issueing the RecoverAllJobs message
-		configuration.setString(ConfigConstants.EXECUTION_RETRY_DELAY_KEY, AkkaUtils.INF_TIMEOUT().toString());
+		configuration.setString(ConfigConstants.AKKA_ASK_TIMEOUT, AkkaUtils.INF_TIMEOUT().toString());
 
 		Tasks.BlockingOnceReceiver$.MODULE$.blocking_$eq(true);
 
@@ -167,7 +168,7 @@ public class ZooKeeperLeaderElectionITCase extends TestLogger {
 		sender.setSlotSharingGroup(slotSharingGroup);
 		receiver.setSlotSharingGroup(slotSharingGroup);
 
-		final JobGraph graph = new JobGraph("Blocking test job", sender, receiver);
+		final JobGraph graph = new JobGraph("Blocking test job", new ExecutionConfig(), sender, receiver);
 
 		final ForkableFlinkMiniCluster cluster = new ForkableFlinkMiniCluster(configuration);
 

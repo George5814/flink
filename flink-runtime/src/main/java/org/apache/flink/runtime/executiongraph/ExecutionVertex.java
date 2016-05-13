@@ -18,7 +18,7 @@
 
 package org.apache.flink.runtime.executiongraph;
 
-import org.apache.flink.api.common.ApplicationID;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.runtime.JobException;
 import org.apache.flink.runtime.blob.BlobKey;
 import org.apache.flink.runtime.deployment.InputChannelDeploymentDescriptor;
@@ -73,7 +73,6 @@ public class ExecutionVertex implements Serializable {
 
 	private static final long serialVersionUID = 42L;
 
-	@SuppressWarnings("unused")
 	private static final Logger LOG = ExecutionGraph.LOG;
 
 	private static final int MAX_DISTINCT_LOCATIONS_TO_CONSIDER = 8;
@@ -155,10 +154,6 @@ public class ExecutionVertex implements Serializable {
 	// --------------------------------------------------------------------------------------------
 	//  Properties
 	// --------------------------------------------------------------------------------------------
-
-	public ApplicationID getApplicationId() {
-		return this.jobVertex.getApplicationID();
-	}
 
 	public JobID getJobId() {
 		return this.jobVertex.getJobId();
@@ -467,11 +462,25 @@ public class ExecutionVertex implements Serializable {
 		this.currentExecution.cancel();
 	}
 
+	public void stop() {
+		this.currentExecution.stop();
+	}
+
 	public void fail(Throwable t) {
 		this.currentExecution.fail(t);
 	}
 
-	public void sendMessageToCurrentExecution(Serializable message, ExecutionAttemptID attemptID) {
+	public boolean sendMessageToCurrentExecution(
+			Serializable message,
+			ExecutionAttemptID attemptID) {
+
+		return sendMessageToCurrentExecution(message, attemptID, null);
+	}
+
+	public boolean sendMessageToCurrentExecution(
+			Serializable message,
+			ExecutionAttemptID attemptID,
+			ActorGateway sender) {
 		Execution exec = getCurrentExecutionAttempt();
 		
 		// check that this is for the correct execution attempt
@@ -482,16 +491,26 @@ public class ExecutionVertex implements Serializable {
 			if (slot != null) {
 				ActorGateway gateway = slot.getInstance().getActorGateway();
 				if (gateway != null) {
-					gateway.tell(message);
+					if (sender == null) {
+						gateway.tell(message);
+					} else {
+						gateway.tell(message, sender);
+					}
+
+					return true;
+				} else {
+					return false;
 				}
 			}
 			else {
 				LOG.debug("Skipping message to undeployed task execution {}/{}", getSimpleName(), attemptID);
+				return false;
 			}
 		}
 		else {
 			LOG.debug("Skipping message to {}/{} because it does not match the current execution",
 					getSimpleName(), attemptID);
+			return false;
 		}
 	}
 	
@@ -618,6 +637,7 @@ public class ExecutionVertex implements Serializable {
 			ExecutionAttemptID executionId,
 			SimpleSlot targetSlot,
 			SerializedValue<StateHandle<?>> operatorState,
+			Map<Integer, SerializedValue<StateHandle<?>>> operatorKvState,
 			long recoveryTimestamp,
 			int attemptNumber) {
 
@@ -647,14 +667,29 @@ public class ExecutionVertex implements Serializable {
 			consumedPartitions.add(new InputGateDeploymentDescriptor(resultId, queueToRequest, partitions));
 		}
 
+		ExecutionConfig config = getExecutionGraph().getExecutionConfig();
 		List<BlobKey> jarFiles = getExecutionGraph().getRequiredJarFiles();
 		List<URL> classpaths = getExecutionGraph().getRequiredClasspaths();
 
-		return new TaskDeploymentDescriptor(getApplicationId(), getJobId(), getJobvertexId(), executionId, getTaskName(),
-				subTaskIndex, getTotalNumberOfParallelSubtasks(), attemptNumber, getExecutionGraph().getJobConfiguration(),
-				jobVertex.getJobVertex().getConfiguration(), jobVertex.getJobVertex().getInvokableClassName(),
-				producedPartitions, consumedPartitions, jarFiles, classpaths, targetSlot.getRoot().getSlotNumber(),
-				operatorState, recoveryTimestamp);
+		return new TaskDeploymentDescriptor(
+			getJobId(),
+			getJobvertexId(),
+			executionId,
+			config,
+			getTaskName(),
+			subTaskIndex,
+			getTotalNumberOfParallelSubtasks(),
+			attemptNumber,
+			getExecutionGraph().getJobConfiguration(),
+			jobVertex.getJobVertex().getConfiguration(),
+			jobVertex.getJobVertex().getInvokableClassName(),
+			producedPartitions,
+			consumedPartitions,
+			jarFiles,
+			classpaths,
+			targetSlot.getRoot().getSlotNumber(),
+			operatorState,
+			recoveryTimestamp);
 	}
 
 	// --------------------------------------------------------------------------------------------

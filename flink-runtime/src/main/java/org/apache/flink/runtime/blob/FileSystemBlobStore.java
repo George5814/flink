@@ -25,7 +25,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
-import org.apache.flink.runtime.util.IOUtils;
+import org.apache.flink.util.IOUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -35,12 +35,13 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.URI;
-import java.net.URISyntaxException;
 
 import static com.google.common.base.Preconditions.checkNotNull;
 
 /**
  * Blob store backed by {@link FileSystem}.
+ *
+ * <p>This is used in addition to the local blob storage
  */
 class FileSystemBlobStore implements BlobStore {
 
@@ -50,26 +51,17 @@ class FileSystemBlobStore implements BlobStore {
 	private final String basePath;
 
 	FileSystemBlobStore(Configuration config) throws IOException {
-		String stateBackendBasePath = config.getString(
-				ConfigConstants.ZOOKEEPER_RECOVERY_PATH, "");
+		String recoveryPath = config.getString(ConfigConstants.ZOOKEEPER_RECOVERY_PATH, null);
 
-		if (stateBackendBasePath.equals("")) {
+		if (recoveryPath == null) {
 			throw new IllegalConfigurationException(String.format("Missing configuration for " +
-				"file system state backend recovery path. Please specify via " +
-				"'%s' key.", ConfigConstants.ZOOKEEPER_RECOVERY_PATH));
+					"file system state backend recovery path. Please specify via " +
+					"'%s' key.", ConfigConstants.ZOOKEEPER_RECOVERY_PATH));
 		}
 
-		stateBackendBasePath += "/blob";
+		this.basePath = recoveryPath + "/blob";
 
-		this.basePath = stateBackendBasePath;
-
-		try {
-			FileSystem.get(new URI(basePath)).mkdirs(new Path(basePath));
-		}
-		catch (URISyntaxException e) {
-			throw new IOException(e);
-		}
-
+		FileSystem.get(new Path(basePath).toUri()).mkdirs(new Path(basePath));
 		LOG.info("Created blob directory {}.", basePath);
 	}
 

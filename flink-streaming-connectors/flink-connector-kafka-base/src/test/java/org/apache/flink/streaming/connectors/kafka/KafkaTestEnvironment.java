@@ -17,7 +17,6 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import kafka.consumer.ConsumerConfig;
 import kafka.server.KafkaServer;
 import org.apache.flink.streaming.connectors.kafka.partitioner.KafkaPartitioner;
 import org.apache.flink.streaming.util.serialization.DeserializationSchema;
@@ -25,7 +24,6 @@ import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchema;
 import org.apache.flink.streaming.util.serialization.KeyedDeserializationSchemaWrapper;
 import org.apache.flink.streaming.util.serialization.KeyedSerializationSchema;
 
-import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Properties;
@@ -37,15 +35,22 @@ public abstract class KafkaTestEnvironment {
 
 	protected static final String KAFKA_HOST = "localhost";
 
-	public abstract void prepare(int numKafkaServers);
+	public abstract void prepare(int numKafkaServers, Properties kafkaServerProperties);
+
+	public void prepare(int numberOfKafkaServers) {
+		this.prepare(numberOfKafkaServers, null);
+	}
 
 	public abstract void shutdown();
 
 	public abstract void deleteTestTopic(String topic);
 
-	public abstract void createTestTopic(String topic, int numberOfPartitions, int replicationFactor);
+	public abstract void createTestTopic(String topic, int numberOfPartitions, int replicationFactor, Properties properties);
 
-	public abstract ConsumerConfig getStandardConsumerConfig();
+	public void createTestTopic(String topic, int numberOfPartitions, int replicationFactor) {
+		this.createTestTopic(topic, numberOfPartitions, replicationFactor, new Properties());
+	}
+
 
 	public abstract Properties getStandardProperties();
 
@@ -80,4 +85,5 @@ public abstract class KafkaTestEnvironment {
 	public abstract int getLeaderToShutDown(String topic) throws Exception;
 
 	public abstract int getBrokerId(KafkaServer server);
+
 }

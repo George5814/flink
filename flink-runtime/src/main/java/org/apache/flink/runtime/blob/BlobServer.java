@@ -22,6 +22,7 @@ import org.apache.commons.io.FileUtils;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.IllegalConfigurationException;
 import org.apache.flink.runtime.jobmanager.RecoveryMode;
 import org.apache.flink.util.NetUtils;
 import org.slf4j.Logger;
@@ -30,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
+import java.net.InetSocketAddress;
 import java.net.ServerSocket;
 import java.net.URL;
 import java.util.ArrayList;
@@ -99,16 +101,11 @@ public class BlobServer extends Thread implements BlobService {
 		if (recoveryMode == RecoveryMode.STANDALONE) {
 			this.blobStore = new VoidBlobStore();
 		}
-		// Recovery. Check that everything has been setup correctly. This is not clean, but it's
-		// better to resolve this with some upcoming changes to the state backend setup.
-		else if (config.containsKey(ConfigConstants.STATE_BACKEND) &&
-				config.containsKey(ConfigConstants.ZOOKEEPER_RECOVERY_PATH)) {
-
+		// Recovery.
+		else if (recoveryMode == RecoveryMode.ZOOKEEPER) {
 			this.blobStore = new FileSystemBlobStore(config);
-		}
-		// Fallback.
-		else {
-			this.blobStore = new VoidBlobStore();
+		} else {
+			throw new IllegalConfigurationException("Unexpected recovery mode '" + recoveryMode + ".");
 		}
 
 		// configure the maximum number of concurrent connections
@@ -325,6 +322,11 @@ public class BlobServer extends Thread implements BlobService {
 				LOG.info("Stopped BLOB server at {}:{}", serverSocket.getInetAddress().getHostAddress(), getPort());
 			}
 		}
+	}
+
+	@Override
+	public BlobClient createClient() throws IOException {
+		return new BlobClient(new InetSocketAddress(serverSocket.getInetAddress(), getPort()));
 	}
 
 	/**

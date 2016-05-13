@@ -17,16 +17,15 @@
 
 package org.apache.flink.streaming.examples.windowing;
 
-import org.apache.flink.api.common.state.OperatorState;
 import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.streaming.api.TimeCharacteristic;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.EventTimeSourceFunction;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.watermark.Watermark;
-import org.apache.flink.streaming.api.windowing.assigners.GlobalWindows;
-import org.apache.flink.streaming.api.windowing.triggers.Trigger;
-import org.apache.flink.streaming.api.windowing.windows.GlobalWindow;
+import org.apache.flink.streaming.api.windowing.assigners.EventTimeSessionWindows;
+import org.apache.flink.streaming.api.windowing.time.Time;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -36,13 +35,14 @@ public class SessionWindowing {
 	@SuppressWarnings("serial")
 	public static void main(String[] args) throws Exception {
 
-		if (!parseParameters(args)) {
-			return;
-		}
-
+		final ParameterTool params = ParameterTool.fromArgs(args);
 		final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+
+		env.getConfig().setGlobalJobParameters(params);
 		env.setStreamTimeCharacteristic(TimeCharacteristic.EventTime);
-		env.setParallelism(2);
+		env.setParallelism(1);
+
+		final boolean fileOutput = params.has("output");
 
 		final List<Tuple3<String, Long, Integer>> input = new ArrayList<>();
 
@@ -58,7 +58,7 @@ public class SessionWindowing {
 		input.add(new Tuple3<>("c", 11L, 1));
 
 		DataStream<Tuple3<String, Long, Integer>> source = env
-				.addSource(new EventTimeSourceFunction<Tuple3<String,Long,Integer>>() {
+				.addSource(new SourceFunction<Tuple3<String,Long,Integer>>() {
 					private static final long serialVersionUID = 1L;
 
 					@Override
@@ -81,87 +81,16 @@ public class SessionWindowing {
 		// We create sessions for each id with max timeout of 3 time units
 		DataStream<Tuple3<String, Long, Integer>> aggregated = source
 				.keyBy(0)
-				.window(GlobalWindows.create())
-				.trigger(new SessionTrigger(3L))
+				.window(EventTimeSessionWindows.withGap(Time.milliseconds(3L)))
 				.sum(2);
 
 		if (fileOutput) {
-			aggregated.writeAsText(outputPath);
+			aggregated.writeAsText(params.get("output"));
 		} else {
+			System.out.println("Printing result to stdout. Use --output to specify output path.");
 			aggregated.print();
 		}
 
 		env.execute();
 	}
-
-	private static class SessionTrigger implements Trigger<Tuple3<String, Long, Integer>, GlobalWindow> {
-
-		private static final long serialVersionUID = 1L;
-
-		private final Long sessionTimeout;
-
-		public SessionTrigger(Long sessionTimeout) {
-			this.sessionTimeout = sessionTimeout;
-
-		}
-
-		@Override
-		public TriggerResult onElement(Tuple3<String, Long, Integer> element, long timestamp, GlobalWindow window, TriggerContext ctx) throws Exception {
-
-			OperatorState<Long> lastSeenState = ctx.getKeyValueState("last-seen", 1L);
-			Long lastSeen = lastSeenState.value();
-
-			Long timeSinceLastEvent = timestamp - lastSeen;
-
-			// Update the last seen event time
-			lastSeenState.update(timestamp);
-
-			ctx.registerEventTimeTimer(timestamp + sessionTimeout);
-
-			if (timeSinceLastEvent > sessionTimeout) {
-				return TriggerResult.FIRE_AND_PURGE;
-			} else {
-				return TriggerResult.CONTINUE;
-			}
-		}
-
-		@Override
-		public TriggerResult onEventTime(long time, GlobalWindow window, TriggerContext ctx) throws Exception {
-			OperatorState<Long> lastSeenState = ctx.getKeyValueState("last-seen", 1L);
-			Long lastSeen = lastSeenState.value();
-
-			if (time - lastSeen >= sessionTimeout) {
-				return TriggerResult.FIRE_AND_PURGE;
-			}
-			return TriggerResult.CONTINUE;
-		}
-
-		@Override
-		public TriggerResult onProcessingTime(long time, GlobalWindow window, TriggerContext ctx) throws Exception {
-			return TriggerResult.CONTINUE;
-		}
-	}
-
-	// *************************************************************************
-	// UTIL METHODS
-	// *************************************************************************
-
-	private static boolean fileOutput = false;
-	private static String outputPath;
-
-	private static boolean parseParameters(String[] args) {
-
-		if (args.length > 0) {
-			// parse input arguments
-			if (args.length == 1) {
-				fileOutput = true;
-				outputPath = args[0];
-			} else {
-				System.err.println("Usage: SessionWindowing <result path>");
-				return false;
-			}
-		}
-		return true;
-	}
-
 }

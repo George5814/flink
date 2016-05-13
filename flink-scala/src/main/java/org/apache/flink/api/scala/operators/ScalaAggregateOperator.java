@@ -21,6 +21,8 @@ package org.apache.flink.api.scala.operators;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.Public;
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.functions.GroupCombineFunction;
 import org.apache.flink.api.common.functions.GroupReduceFunction;
@@ -34,7 +36,7 @@ import org.apache.flink.api.java.aggregation.AggregationFunction;
 import org.apache.flink.api.java.aggregation.AggregationFunctionFactory;
 import org.apache.flink.api.java.aggregation.Aggregations;
 import org.apache.flink.api.java.operators.Grouping;
-import org.apache.flink.api.java.operators.Keys;
+import org.apache.flink.api.common.operators.Keys;
 import org.apache.flink.api.java.operators.SingleInputOperator;
 import org.apache.flink.api.java.typeutils.TupleTypeInfoBase;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializerBase;
@@ -50,6 +52,7 @@ import scala.Product;
  *
  * @param <IN> The type of the data set aggregated by the operator.
  */
+@Public
 public class ScalaAggregateOperator<IN> extends SingleInputOperator<IN, IN, ScalaAggregateOperator<IN>> {
 
 	private final List<AggregationFunction<?>> aggregationFunctions = new ArrayList<>(4);
@@ -230,6 +233,7 @@ public class ScalaAggregateOperator<IN> extends SingleInputOperator<IN, IN, Scal
 
 	// --------------------------------------------------------------------------------------------
 
+	@Internal
 	public static final class AggregatingUdf<T extends Product>
 		extends RichGroupReduceFunction<T, T>
 		implements GroupCombineFunction<T, T>

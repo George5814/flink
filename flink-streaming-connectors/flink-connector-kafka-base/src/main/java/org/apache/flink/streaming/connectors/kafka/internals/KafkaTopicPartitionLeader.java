@@ -20,8 +20,6 @@ package org.apache.flink.streaming.connectors.kafka.internals;
 import org.apache.kafka.common.Node;
 
 import java.io.Serializable;
-import java.util.List;
-import java.util.Map;
 
 /**
  * Serializable Topic Partition info with leader Node information.
@@ -64,14 +62,6 @@ public class KafkaTopicPartitionLeader implements Serializable {
 		}
 	}
 
-	public static Object toString(List<KafkaTopicPartitionLeader> partitions) {
-		StringBuilder sb = new StringBuilder();
-		for (KafkaTopicPartitionLeader p: partitions) {
-			sb.append(p.getTopicPartition().getTopic()).append(":").append(p.getTopicPartition().getPartition()).append(", ");
-		}
-		return sb.toString();
-	}
-
 	@Override
 	public boolean equals(Object o) {
 		if (this == o) {
@@ -105,25 +95,4 @@ public class KafkaTopicPartitionLeader implements Serializable {
 				'}';
 	}
 
-
-	/**
-	 * Replaces an existing KafkaTopicPartition ignoring the leader in the given map.
-	 *
-	 * @param newKey new topicpartition
-	 * @param newValue new offset
-	 * @param map map to do the search in
-	 * @return oldValue the old value (offset)
-	 */
-	public static Long replaceIgnoringLeader(KafkaTopicPartitionLeader newKey, Long newValue, Map<KafkaTopicPartitionLeader, Long> map) {
-		for(Map.Entry<KafkaTopicPartitionLeader, Long> entry: map.entrySet()) {
-			if(entry.getKey().getTopicPartition().equals(newKey.getTopicPartition())) {
-				Long oldValue = map.remove(entry.getKey());
-				if(map.put(newKey, newValue) != null) {
-					throw new IllegalStateException("Key was not removed before");
-				}
-				return oldValue;
-			}
-		}
-		return null;
-	}
 }

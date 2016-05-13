@@ -23,7 +23,8 @@ import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.api.common.functions.ReduceFunction;
 import org.apache.flink.api.common.functions.RichReduceFunction;
-import org.apache.flink.api.common.state.OperatorState;
+import org.apache.flink.api.common.state.ValueState;
+import org.apache.flink.api.common.state.ValueStateDescriptor;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.IntSerializer;
@@ -36,7 +37,7 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.Output;
-import org.apache.flink.runtime.state.StateBackend;
+import org.apache.flink.runtime.state.AbstractStateBackend;
 import org.apache.flink.runtime.state.memory.MemoryStateBackend;
 import org.apache.flink.streaming.runtime.operators.Triggerable;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -47,7 +48,6 @@ import org.junit.After;
 import org.junit.Test;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
-import org.mockito.stubbing.OngoingStubbing;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -263,7 +263,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = 0; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -327,7 +327,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 					int val = ((int) nextTime) ^ ((int) (nextTime >>> 32));
 
 					StreamRecord<Tuple2<Integer, Integer>> next =  new StreamRecord<>(new Tuple2<>(val, val));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 
 					if (nextTime != previousNextTime) {
@@ -388,7 +388,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = 0; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -454,11 +454,11 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 
 			synchronized (lock) {
 				StreamRecord<Tuple2<Integer, Integer>> next1 = new StreamRecord<>(new Tuple2<>(1, 1));
-				op.setKeyContextElement(next1);
+				op.setKeyContextElement1(next1);
 				op.processElement(next1);
 				
 				StreamRecord<Tuple2<Integer, Integer>> next2 = new StreamRecord<>(new Tuple2<>(2, 2));
-				op.setKeyContextElement(next2);
+				op.setKeyContextElement1(next2);
 				op.processElement(next2);
 			}
 
@@ -517,14 +517,14 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = 0; i < 100; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(1, 1)); 
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 			}
 			
 			try {
 				StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(1, 1));
-				op.setKeyContextElement(next);
+				op.setKeyContextElement1(next);
 				op.processElement(next);
 				fail("This fail with an exception");
 			}
@@ -569,7 +569,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = 0; i < numElementsFirst; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -592,7 +592,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = numElementsFirst; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -615,7 +615,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = numElementsFirst; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -677,7 +677,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = 0; i < numElementsFirst; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -700,7 +700,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = numElementsFirst; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -724,7 +724,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			for (int i = numElementsFirst; i < numElements; i++) {
 				synchronized (lock) {
 					StreamRecord<Tuple2<Integer, Integer>> next = new StreamRecord<>(new Tuple2<>(i, i));
-					op.setKeyContextElement(next);
+					op.setKeyContextElement1(next);
 					op.processElement(next);
 				}
 				Thread.sleep(1);
@@ -768,7 +768,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 	public void testKeyValueStateInWindowFunctionTumbling() {
 		final ScheduledExecutorService timerService = Executors.newSingleThreadScheduledExecutor();
 		try {
-			final long thirtySeconds = 30_000;
+			final long twoSeconds = 2000;
 			
 			final CollectingOutput<Tuple2<Integer, Integer>> out = new CollectingOutput<>();
 			final Object lock = new Object();
@@ -779,7 +779,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			AggregatingProcessingTimeWindowOperator<Integer, Tuple2<Integer, Integer>> op =
 					new AggregatingProcessingTimeWindowOperator<>(
 							new StatefulFunction(), fieldOneSelector,
-							IntSerializer.INSTANCE, tupleSerializer, thirtySeconds, thirtySeconds);
+							IntSerializer.INSTANCE, tupleSerializer, twoSeconds, twoSeconds);
 
 			op.setup(mockTask, createTaskConfig(fieldOneSelector, IntSerializer.INSTANCE), out);
 			op.open();
@@ -790,27 +790,21 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			synchronized (lock) {
 				for (int i = 0; i < 10; i++) {
 					StreamRecord<Tuple2<Integer, Integer>> next1 = new StreamRecord<>(new Tuple2<>(1, i));
-					op.setKeyContextElement(next1);
+					op.setKeyContextElement1(next1);
 					op.processElement(next1);
 	
 					StreamRecord<Tuple2<Integer, Integer>> next2 = new StreamRecord<>(new Tuple2<>(2, i));
-					op.setKeyContextElement(next2);
+					op.setKeyContextElement1(next2);
 					op.processElement(next2);
 				}
 			}
 
-			out.waitForNElements(2, 60_000);
-
-			List<Tuple2<Integer, Integer>> result = out.getElements();
-			assertEquals(2, result.size());
-
-			Collections.sort(result, tupleComparator);
-			assertEquals(45, result.get(0).f1.intValue());
-			assertEquals(45, result.get(1).f1.intValue());
-
-			assertEquals(10, StatefulFunction.globalCounts.get(1).intValue());
-			assertEquals(10, StatefulFunction.globalCounts.get(2).intValue());
-
+			while (StatefulFunction.globalCounts.get(1) < 10 ||
+					StatefulFunction.globalCounts.get(2) < 10)
+			{
+				Thread.sleep(50);
+			}
+			
 			op.close();
 			op.dispose();
 		}
@@ -859,13 +853,13 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 
 				// because we do not release the lock between elements, they end up in the same windows
 				synchronized (lock) {
-					op.setKeyContextElement(next1);
+					op.setKeyContextElement1(next1);
 					op.processElement(next1);
-					op.setKeyContextElement(next2);
+					op.setKeyContextElement1(next2);
 					op.processElement(next2);
-					op.setKeyContextElement(next3);
+					op.setKeyContextElement1(next3);
 					op.processElement(next3);
-					op.setKeyContextElement(next4);
+					op.setKeyContextElement1(next4);
 					op.processElement(next4);
 				}
 
@@ -941,7 +935,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 
 		static final Map<Integer, Integer> globalCounts = new ConcurrentHashMap<>();
 
-		private OperatorState<Integer> state;
+		private ValueState<Integer> state;
 
 		@Override
 		public void open(Configuration parameters) {
@@ -949,7 +943,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 			
 			// start with one, so the final count is correct and we test that we do not
 			// initialize with 0 always by default
-			state = getRuntimeContext().getKeyValueState("totalCount", Integer.class, 1);
+			state = getRuntimeContext().getState(new ValueStateDescriptor<>("totalCount", Integer.class, 1));
 		}
 
 		@Override
@@ -969,18 +963,27 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 		when(task.getName()).thenReturn("Test task name");
 		when(task.getExecutionConfig()).thenReturn(new ExecutionConfig());
 
-		Environment env = mock(Environment.class);
+		final Environment env = mock(Environment.class);
 		when(env.getTaskInfo()).thenReturn(new TaskInfo("Test task name", 0, 1, 0));
 		when(env.getUserClassLoader()).thenReturn(AggregatingAlignedProcessingTimeWindowOperatorTest.class.getClassLoader());
 		
 		when(task.getEnvironment()).thenReturn(env);
 
-		// ugly java generic hacks to get the state backend into the mock
-		@SuppressWarnings("unchecked")
-		OngoingStubbing<StateBackend<?>> stubbing =
-				(OngoingStubbing<StateBackend<?>>) (OngoingStubbing<?>) when(task.getStateBackend());
-		stubbing.thenReturn(MemoryStateBackend.defaultInstance());
-		
+		try {
+			doAnswer(new Answer<AbstractStateBackend>() {
+				@Override
+				public AbstractStateBackend answer(InvocationOnMock invocationOnMock) throws Throwable {
+					final String operatorIdentifier = (String) invocationOnMock.getArguments()[0];
+					final TypeSerializer<?> keySerializer = (TypeSerializer<?>) invocationOnMock.getArguments()[1];
+					MemoryStateBackend backend = MemoryStateBackend.create();
+					backend.initializeForJob(env, operatorIdentifier, keySerializer);
+					return backend;
+				}
+			}).when(task).createStateBackend(any(String.class), any(TypeSerializer.class));
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+
 		return task;
 	}
 
@@ -1015,7 +1018,7 @@ public class AggregatingAlignedProcessingTimeWindowOperatorTest {
 
 	private static StreamConfig createTaskConfig(KeySelector<?, ?> partitioner, TypeSerializer<?> keySerializer) {
 		StreamConfig cfg = new StreamConfig(new Configuration());
-		cfg.setStatePartitioner(partitioner);
+		cfg.setStatePartitioner(0, partitioner);
 		cfg.setStateKeySerializer(keySerializer);
 		return cfg;
 	}

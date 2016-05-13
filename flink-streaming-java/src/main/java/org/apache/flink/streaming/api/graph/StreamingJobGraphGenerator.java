@@ -20,9 +20,12 @@ package org.apache.flink.streaming.api.graph;
 import com.google.common.hash.HashFunction;
 import com.google.common.hash.Hasher;
 import com.google.common.hash.Hashing;
+
 import org.apache.commons.lang3.StringUtils;
-import org.apache.flink.api.common.ExecutionConfig;
+
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.operators.util.UserCodeObjectWrapper;
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.io.network.partition.ResultPartitionType;
@@ -44,10 +47,11 @@ import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.StreamOperator;
 import org.apache.flink.streaming.api.transformations.StreamTransformation;
 import org.apache.flink.streaming.runtime.partitioner.ForwardPartitioner;
+import org.apache.flink.streaming.runtime.partitioner.RescalePartitioner;
 import org.apache.flink.streaming.runtime.partitioner.StreamPartitioner;
 import org.apache.flink.streaming.runtime.tasks.StreamIterationHead;
 import org.apache.flink.streaming.runtime.tasks.StreamIterationTail;
-import org.apache.flink.util.InstantiationUtil;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -68,9 +72,16 @@ import java.util.Set;
 
 import static org.apache.flink.util.StringUtils.byteToHexString;
 
+@Internal
 public class StreamingJobGraphGenerator {
 
 	private static final Logger LOG = LoggerFactory.getLogger(StreamingJobGraphGenerator.class);
+
+	/**
+	 * Restart delay used for the FixedDelayRestartStrategy in case checkpointing was enabled but
+	 * no restart strategy has been specified.
+	 */
+	private static final long DEFAULT_RESTART_DELAY = 10000L;
 
 	private StreamGraph streamGraph;
 
@@ -90,16 +101,16 @@ public class StreamingJobGraphGenerator {
 	}
 
 	private void init() {
-		this.jobVertices = new HashMap<Integer, JobVertex>();
-		this.builtVertices = new HashSet<Integer>();
-		this.chainedConfigs = new HashMap<Integer, Map<Integer, StreamConfig>>();
-		this.vertexConfigs = new HashMap<Integer, StreamConfig>();
-		this.chainedNames = new HashMap<Integer, String>();
-		this.physicalEdgesInOrder = new ArrayList<StreamEdge>();
+		this.jobVertices = new HashMap<>();
+		this.builtVertices = new HashSet<>();
+		this.chainedConfigs = new HashMap<>();
+		this.vertexConfigs = new HashMap<>();
+		this.chainedNames = new HashMap<>();
+		this.physicalEdgesInOrder = new ArrayList<>();
 	}
 
-	public JobGraph createJobGraph(String jobName) {
-		jobGraph = new JobGraph(streamGraph.getJobName());
+	public JobGraph createJobGraph() {
+		jobGraph = new JobGraph(streamGraph.getJobName(), streamGraph.getExecutionConfig());
 
 		// make sure that all vertices start immediately
 		jobGraph.setScheduleMode(ScheduleMode.ALL);
@@ -118,16 +129,13 @@ public class StreamingJobGraphGenerator {
 		
 		configureCheckpointing();
 
-		configureExecutionRetries();
-
-		configureExecutionRetryDelay();
-
 		try {
-			InstantiationUtil.writeObjectToConfig(this.streamGraph.getExecutionConfig(), this.jobGraph.getJobConfiguration(), ExecutionConfig.CONFIG_KEY);
+			// make sure that we can send the ExecutionConfig without user code object problems
+			jobGraph.getExecutionConfig().serializeUserCode();
 		} catch (IOException e) {
-			throw new RuntimeException("Config object could not be written to Job Configuration: ", e);
+			throw new IllegalStateException("Could not serialize ExecutionConfig.", e);
 		}
-		
+
 		return jobGraph;
 	}
 
@@ -141,7 +149,7 @@ public class StreamingJobGraphGenerator {
 
 			// create if not set
 			if (inEdges == null) {
-				inEdges = new ArrayList<StreamEdge>();
+				inEdges = new ArrayList<>();
 				physicalInEdgesInOrder.put(target, inEdges);
 			}
 
@@ -309,12 +317,14 @@ public class StreamingJobGraphGenerator {
 		config.setTypeSerializerOut(vertex.getTypeSerializerOut());
 
 		config.setStreamOperator(vertex.getOperator());
-		config.setOutputSelectorWrapper(vertex.getOutputSelectorWrapper());
+		config.setOutputSelectors(vertex.getOutputSelectors());
 
 		config.setNumberOfOutputs(nonChainableOutputs.size());
 		config.setNonChainedOutputs(nonChainableOutputs);
 		config.setChainedOutputs(chainableOutputs);
 
+		config.setTimeCharacteristic(streamGraph.getEnvironment().getStreamTimeCharacteristic());
+		
 		final CheckpointConfig ceckpointCfg = streamGraph.getCheckpointConfig();
 		
 		config.setStateBackend(streamGraph.getStateBackend());
@@ -327,7 +337,8 @@ public class StreamingJobGraphGenerator {
 			// so we use that one if checkpointing is not enabled
 			config.setCheckpointMode(CheckpointingMode.AT_LEAST_ONCE);
 		}
-		config.setStatePartitioner(vertex.getStatePartitioner());
+		config.setStatePartitioner(0, vertex.getStatePartitioner1());
+		config.setStatePartitioner(1, vertex.getStatePartitioner2());
 		config.setStateKeySerializer(vertex.getStateKeySerializer());
 		
 		Class<? extends AbstractInvokable> vertexClass = vertex.getJobVertexClass();
@@ -360,10 +371,16 @@ public class StreamingJobGraphGenerator {
 		StreamPartitioner<?> partitioner = edge.getPartitioner();
 		if (partitioner instanceof ForwardPartitioner) {
 			downStreamVertex.connectNewDataSetAsInput(
-					headVertex,
-					DistributionPattern.POINTWISE,
-					ResultPartitionType.PIPELINED,
-					true);
+				headVertex,
+				DistributionPattern.POINTWISE,
+				ResultPartitionType.PIPELINED,
+				true);
+		} else if (partitioner instanceof RescalePartitioner){
+			downStreamVertex.connectNewDataSetAsInput(
+				headVertex,
+				DistributionPattern.POINTWISE,
+				ResultPartitionType.PIPELINED,
+				true);
 		} else {
 			downStreamVertex.connectNewDataSetAsInput(
 					headVertex,
@@ -388,35 +405,29 @@ public class StreamingJobGraphGenerator {
 		return downStreamVertex.getInEdges().size() == 1
 				&& outOperator != null
 				&& headOperator != null
-				&& upStreamVertex.getSlotSharingID() == downStreamVertex.getSlotSharingID()
-				&& upStreamVertex.getSlotSharingID() != -1
-				&& (outOperator.getChainingStrategy() == ChainingStrategy.ALWAYS ||
-					outOperator.getChainingStrategy() == ChainingStrategy.FORCE_ALWAYS)
+				&& upStreamVertex.isSameSlotSharingGroup(downStreamVertex)
+				&& outOperator.getChainingStrategy() == ChainingStrategy.ALWAYS
 				&& (headOperator.getChainingStrategy() == ChainingStrategy.HEAD ||
-					headOperator.getChainingStrategy() == ChainingStrategy.ALWAYS ||
-					headOperator.getChainingStrategy() == ChainingStrategy.FORCE_ALWAYS)
+					headOperator.getChainingStrategy() == ChainingStrategy.ALWAYS)
 				&& (edge.getPartitioner() instanceof ForwardPartitioner)
 				&& upStreamVertex.getParallelism() == downStreamVertex.getParallelism()
-				&& (streamGraph.isChainingEnabled() ||
-					outOperator.getChainingStrategy() == ChainingStrategy.FORCE_ALWAYS);
+				&& streamGraph.isChainingEnabled();
 	}
 
 	private void setSlotSharing() {
 
-		Map<Integer, SlotSharingGroup> slotSharingGroups = new HashMap<>();
+		Map<String, SlotSharingGroup> slotSharingGroups = new HashMap<>();
 
 		for (Entry<Integer, JobVertex> entry : jobVertices.entrySet()) {
 
-			int slotSharingID = streamGraph.getStreamNode(entry.getKey()).getSlotSharingID();
+			String slotSharingGroup = streamGraph.getStreamNode(entry.getKey()).getSlotSharingGroup();
 
-			if (slotSharingID != -1) {
-				SlotSharingGroup group = slotSharingGroups.get(slotSharingID);
-				if (group == null) {
-					group = new SlotSharingGroup();
-					slotSharingGroups.put(slotSharingID, group);
-				}
-				entry.getValue().setSlotSharingGroup(group);
+			SlotSharingGroup group = slotSharingGroups.get(slotSharingGroup);
+			if (group == null) {
+				group = new SlotSharingGroup();
+				slotSharingGroups.put(slotSharingGroup, group);
 			}
+			entry.getValue().setSlotSharingGroup(group);
 		}
 
 		for (Tuple2<StreamNode, StreamNode> pair : streamGraph.getIterationSourceSinkPairs()) {
@@ -470,22 +481,13 @@ public class StreamingJobGraphGenerator {
 					cfg.getMaxConcurrentCheckpoints());
 			jobGraph.setSnapshotSettings(settings);
 
-			// if the user enabled checkpointing, the default number of exec retries is infinitive.
-			int executionRetries = streamGraph.getExecutionConfig().getNumberOfExecutionRetries();
-			if(executionRetries == -1) {
-				streamGraph.getExecutionConfig().setNumberOfExecutionRetries(Integer.MAX_VALUE);
+			// check if a restart strategy has been set, if not then set the FixedDelayRestartStrategy
+			if (streamGraph.getExecutionConfig().getRestartStrategy() == null) {
+				// if the user enabled checkpointing, the default number of exec retries is infinite.
+				streamGraph.getExecutionConfig().setRestartStrategy(
+					RestartStrategies.fixedDelayRestart(Integer.MAX_VALUE, DEFAULT_RESTART_DELAY));
 			}
 		}
-	}
-
-	private void configureExecutionRetries() {
-		int executionRetries = streamGraph.getExecutionConfig().getNumberOfExecutionRetries();
-		jobGraph.setNumberOfExecutionRetries(executionRetries);
-	}
-
-	private void configureExecutionRetryDelay() {
-		long executionRetryDelay = streamGraph.getExecutionConfig().getExecutionRetryDelay();
-		jobGraph.setExecutionRetryDelay(executionRetryDelay);
 	}
 
 	// ------------------------------------------------------------------------
@@ -697,7 +699,7 @@ public class StreamingJobGraphGenerator {
 		if (LOG.isDebugEnabled()) {
 			String udfClassName = "";
 			if (node.getOperator() instanceof AbstractUdfStreamOperator) {
-				udfClassName = ((AbstractUdfStreamOperator) node.getOperator())
+				udfClassName = ((AbstractUdfStreamOperator<?, ?>) node.getOperator())
 						.getUserFunction().getClass().getName();
 			}
 
@@ -727,10 +729,8 @@ public class StreamingJobGraphGenerator {
 
 		hasher.putInt(node.getParallelism());
 
-		hasher.putString(node.getOperatorName(), Charset.forName("UTF-8"));
-
 		if (node.getOperator() instanceof AbstractUdfStreamOperator) {
-			String udfClassName = ((AbstractUdfStreamOperator) node.getOperator())
+			String udfClassName = ((AbstractUdfStreamOperator<?, ?>) node.getOperator())
 					.getUserFunction().getClass().getName();
 
 			hasher.putString(udfClassName, Charset.forName("UTF-8"));

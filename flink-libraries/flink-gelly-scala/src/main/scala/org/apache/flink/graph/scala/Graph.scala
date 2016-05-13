@@ -18,19 +18,24 @@
 
 package org.apache.flink.graph.scala
 
-import com.google.common.base.Preconditions
+import org.apache.flink.util.Preconditions
 import org.apache.flink.api.common.functions.{FilterFunction, MapFunction}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.{tuple => jtuple}
 import org.apache.flink.api.scala._
 import org.apache.flink.graph._
+import org.apache.flink.graph.asm.translate.TranslateFunction
 import org.apache.flink.graph.validation.GraphValidator
 import org.apache.flink.graph.gsa.{ApplyFunction, GSAConfiguration, GatherFunction, SumFunction}
-import org.apache.flink.graph.spargel.{MessagingFunction, VertexCentricConfiguration, VertexUpdateFunction}
+import org.apache.flink.graph.spargel.{MessagingFunction, ScatterGatherConfiguration, VertexUpdateFunction}
 import org.apache.flink.{graph => jg}
+
 import _root_.scala.collection.JavaConverters._
 import _root_.scala.reflect.ClassTag
 import org.apache.flink.types.NullValue
+import org.apache.flink.graph.pregel.ComputeFunction
+import org.apache.flink.graph.pregel.MessageCombiner
+import org.apache.flink.graph.pregel.VertexCentricConfiguration
 
 object Graph {
 
@@ -401,6 +406,90 @@ TypeInformation : ClassTag](jgraph: jg.Graph[K, VV, EV]) {
       def map(in: Edge[K, EV]): NV = cleanFun(in)
     }
     new Graph[K, VV, NV](jgraph.mapEdges[NV](mapper, createTypeInformation[Edge[K, NV]]))
+  }
+
+  /**
+   * Translate vertex and edge IDs using the given MapFunction.
+   *
+   * @param translator implements conversion from K to NEW
+   * @return graph with translated vertex and edge IDs
+   */
+  def translateGraphIds[NEW: TypeInformation : ClassTag](translator: TranslateFunction[K, NEW]):
+  Graph[NEW, VV, EV] = {
+    new Graph[NEW, VV, EV](jgraph.translateGraphIds(translator))
+  }
+
+  /**
+    * Translate vertex and edge IDs using the given function.
+    *
+    * @param fun implements conversion from K to NEW
+    * @return graph with translated vertex and edge IDs
+    */
+  def translateGraphIds[NEW: TypeInformation : ClassTag](fun: (K, NEW) => NEW):
+  Graph[NEW, VV, EV] = {
+    val translator: TranslateFunction[K, NEW] = new TranslateFunction[K, NEW] {
+      val cleanFun = clean(fun)
+
+      def translate(in: K, reuse: NEW): NEW = cleanFun(in, reuse)
+    }
+
+    new Graph[NEW, VV, EV](jgraph.translateGraphIds(translator))
+  }
+
+  /**
+   * Translate vertex values using the given MapFunction.
+   *
+   * @param translator implements conversion from VV to NEW
+   * @return graph with translated vertex values
+   */
+  def translateVertexValues[NEW: TypeInformation : ClassTag](translator:
+  TranslateFunction[VV, NEW]): Graph[K, NEW, EV] = {
+    new Graph[K, NEW, EV](jgraph.translateVertexValues(translator))
+  }
+
+  /**
+    * Translate vertex values using the given function.
+    *
+    * @param fun implements conversion from VV to NEW
+    * @return graph with translated vertex values
+    */
+  def translateVertexValues[NEW: TypeInformation : ClassTag](fun: (VV, NEW) => NEW):
+  Graph[K, NEW, EV] = {
+    val translator: TranslateFunction[VV, NEW] = new TranslateFunction[VV, NEW] {
+      val cleanFun = clean(fun)
+
+      def translate(in: VV, reuse: NEW): NEW = cleanFun(in, reuse)
+    }
+
+    new Graph[K, NEW, EV](jgraph.translateVertexValues(translator))
+  }
+
+  /**
+   * Translate edge values using the given MapFunction.
+   *
+   * @param translator implements conversion from EV to NEW
+   * @return graph with translated edge values
+   */
+  def translateEdgeValues[NEW: TypeInformation : ClassTag](translator: TranslateFunction[EV, NEW]):
+  Graph[K, VV, NEW] = {
+    new Graph[K, VV, NEW](jgraph.translateEdgeValues(translator))
+  }
+
+  /**
+    * Translate edge values using the given function.
+    *
+    * @param fun implements conversion from EV to NEW
+    * @return graph with translated edge values
+    */
+  def translateEdgeValues[NEW: TypeInformation : ClassTag](fun: (EV, NEW) => NEW):
+  Graph[K, VV, NEW] = {
+    val translator: TranslateFunction[EV, NEW] = new TranslateFunction[EV, NEW] {
+      val cleanFun = clean(fun)
+
+      def translate(in: EV, reuse: NEW): NEW = cleanFun(in, reuse)
+    }
+
+    new Graph[K, VV, NEW](jgraph.translateEdgeValues(translator))
   }
 
   /**
@@ -1027,39 +1116,39 @@ TypeInformation : ClassTag](jgraph: jg.Graph[K, VV, EV]) {
   }
 
   /**
-   * Runs a Vertex-Centric iteration on the graph.
+   * Runs a scatter-gather iteration on the graph.
    * No configuration options are provided.
    *
    * @param vertexUpdateFunction the vertex update function
    * @param messagingFunction the messaging function
    * @param maxIterations maximum number of iterations to perform
    *
-   * @return the updated Graph after the vertex-centric iteration has converged or
+   * @return the updated Graph after the scatter-gather iteration has converged or
    *         after maximumNumberOfIterations.
    */
-  def runVertexCentricIteration[M](vertexUpdateFunction: VertexUpdateFunction[K, VV, M],
+  def runScatterGatherIteration[M](vertexUpdateFunction: VertexUpdateFunction[K, VV, M],
                                    messagingFunction: MessagingFunction[K, VV, M, EV],
                                    maxIterations: Int): Graph[K, VV, EV] = {
-    wrapGraph(jgraph.runVertexCentricIteration(vertexUpdateFunction, messagingFunction,
+    wrapGraph(jgraph.runScatterGatherIteration(vertexUpdateFunction, messagingFunction,
       maxIterations))
   }
 
   /**
-   * Runs a Vertex-Centric iteration on the graph with configuration options.
+   * Runs a scatter-gather iteration on the graph with configuration options.
    *
    * @param vertexUpdateFunction the vertex update function
    * @param messagingFunction the messaging function
    * @param maxIterations maximum number of iterations to perform
    * @param parameters the iteration configuration parameters
    *
-   * @return the updated Graph after the vertex-centric iteration has converged or
+   * @return the updated Graph after the scatter-gather iteration has converged or
    *         after maximumNumberOfIterations.
    */
-  def runVertexCentricIteration[M](vertexUpdateFunction: VertexUpdateFunction[K, VV, M],
+  def runScatterGatherIteration[M](vertexUpdateFunction: VertexUpdateFunction[K, VV, M],
                                    messagingFunction: MessagingFunction[K, VV, M, EV],
-                                   maxIterations: Int, parameters: VertexCentricConfiguration):
+                                   maxIterations: Int, parameters: ScatterGatherConfiguration):
   Graph[K, VV, EV] = {
-    wrapGraph(jgraph.runVertexCentricIteration(vertexUpdateFunction, messagingFunction,
+    wrapGraph(jgraph.runScatterGatherIteration(vertexUpdateFunction, messagingFunction,
       maxIterations, parameters))
   }
 
@@ -1102,6 +1191,43 @@ TypeInformation : ClassTag](jgraph: jg.Graph[K, VV, EV]) {
   SumFunction[VV, EV, M], applyFunction: ApplyFunction[K, VV, M], maxIterations: Int,
                                     parameters: GSAConfiguration): Graph[K, VV, EV] = {
     wrapGraph(jgraph.runGatherSumApplyIteration(gatherFunction, sumFunction, applyFunction,
+      maxIterations, parameters))
+  }
+
+   /**
+   * Runs a vertex-centric iteration on the graph.
+   * No configuration options are provided.
+   *
+   * @param computeFunction the compute function
+   * @param combineFunction the optional message combiner function
+   * @param maxIterations maximum number of iterations to perform
+   *
+   * @return the updated Graph after the vertex-centric iteration has converged or
+   *         after maximumNumberOfIterations.
+   */
+  def runVertexCentricIteration[M](computeFunction: ComputeFunction[K, VV, EV, M],
+                                   combineFunction: MessageCombiner[K, M],
+                                   maxIterations: Int): Graph[K, VV, EV] = {
+    wrapGraph(jgraph.runVertexCentricIteration(computeFunction, combineFunction,
+      maxIterations))
+  }
+
+  /**
+   * Runs a vertex-centric iteration on the graph with configuration options.
+   *
+   * @param computeFunction the compute function
+   * @param combineFunction the optional message combiner function
+   * @param maxIterations maximum number of iterations to perform
+   * @param parameters the iteration configuration parameters
+   *
+   * @return the updated Graph after the vertex-centric iteration has converged or
+   *         after maximumNumberOfIterations.
+   */
+  def runVertexCentricIteration[M](computeFunction: ComputeFunction[K, VV, EV, M],
+                                   combineFunction: MessageCombiner[K, M],
+                                   maxIterations: Int, parameters: VertexCentricConfiguration):
+  Graph[K, VV, EV] = {
+    wrapGraph(jgraph.runVertexCentricIteration(computeFunction, combineFunction,
       maxIterations, parameters))
   }
 

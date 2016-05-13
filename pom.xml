@@ -28,7 +28,7 @@ under the License.
 
 	<groupId>org.apache.flink</groupId>
 	<artifactId>flink-parent</artifactId>
-	<version>1.0-SNAPSHOT</version>
+	<version>1.1-SNAPSHOT</version>
 
 	<name>flink</name>
 	<packaging>pom</packaging>
@@ -50,6 +50,8 @@ under the License.
 	</scm>
 
 	<modules>
+		<!--- Dummy module to force execution of the Maven Shade plugin (see Shade plugin below) -->
+		<module>tools/force-shading</module>
 		<module>flink-annotations</module>
 		<module>flink-shaded-hadoop</module>
 		<module>flink-shaded-curator</module>
@@ -96,7 +98,7 @@ under the License.
 		<!-- Default scala versions, may be overwritten by build profiles -->
 		<scala.version>2.10.4</scala.version>
 		<scala.binary.version>2.10</scala.binary.version>
-		<chill.version>0.5.2</chill.version>
+		<chill.version>0.7.4</chill.version>
 		<asm.version>5.0.4</asm.version>
 		<zookeeper.version>3.4.6</zookeeper.version>
 		<curator.version>2.8.0</curator.version>
@@ -104,6 +106,19 @@ under the License.
 	</properties>
 
 	<dependencies>
+
+		<dependency>
+			<groupId>org.apache.flink</groupId>
+			<artifactId>force-shading</artifactId>
+			<version>1.1-SNAPSHOT</version>
+		</dependency>
+
+		<!-- Add the 'javax.annotation' annotations (JSR305), such as '@Nullable' -->
+		<dependency>
+			<groupId>com.google.code.findbugs</groupId>
+			<artifactId>jsr305</artifactId>
+		</dependency>
+		
 		<dependency>
 			<groupId>org.apache.commons</groupId>
 			<artifactId>commons-lang3</artifactId>
@@ -182,6 +197,13 @@ under the License.
 		-->
 		<dependencies>
 
+			<!-- This manages the 'javax.annotation' annotations (JSR305) -->
+			<dependency>
+				<groupId>com.google.code.findbugs</groupId>
+				<artifactId>jsr305</artifactId>
+				<version>1.3.9</version>
+			</dependency>
+			
 			<!-- Make sure we use a consistent avro version throughout the project -->
 			<dependency>
 				<groupId>org.apache.avro</groupId>
@@ -207,11 +229,25 @@ under the License.
 				<version>2.4</version>
 			</dependency>
 
-			<!-- common-collections is used by us and by hadoop, so we need to define a common version -->
+			<!-- common-beanutils-bean-collections is used by flink-shaded-hadoop2 -->
 			<dependency>
-				<groupId>commons-collections</groupId>
-				<artifactId>commons-collections</artifactId>
-				<version>3.2.2</version>
+				<groupId>commons-beanutils</groupId>
+				<artifactId>commons-beanutils-bean-collections</artifactId>
+				<version>1.8.3</version>
+			</dependency>
+
+			<!--We have to bump the commons-configuration to version 1.7 because Hadoop uses per
+			default 1.6. This version has the problem that it depends on commons-beanutils-core and
+			commons-digester. Commons-digester depends on commons-beanutils. Both dependencies are
+			contains classes of commons-collections. Since the dependency reduced pom does not
+			exclude commons-beanutils from commons-configuration, sbt would pull it in again. The
+			solution is setting the version of commons-configuration to 1.7 which also depends on
+			common-beanutils. Consequently, the dependency reduced pom will also contain an
+			exclusion for commons-beanutils for commons-configuration. -->
+			<dependency>
+				<groupId>commons-configuration</groupId>
+				<artifactId>commons-configuration</artifactId>
+				<version>1.7</version>
 			</dependency>
 
 			<dependency>
@@ -238,13 +274,6 @@ under the License.
 				<groupId>org.joda</groupId>
 				<artifactId>joda-convert</artifactId>
 				<version>1.7</version>
-			</dependency>
-			
-			<!-- stax is pulled in different versions by different transitive dependencies-->
-			<dependency>
-				<groupId>stax</groupId>
-				<artifactId>stax-api</artifactId>
-				<version>1.0.1</version>
 			</dependency>
 			
 			<!-- kryo used in different versions by Flink an chill -->
@@ -346,18 +375,6 @@ under the License.
 
 				[1] https://github.com/netty/netty/issues/3704 -->
 				<version>4.0.27.Final</version>
-			</dependency>
-
-			<dependency>
-				<groupId>org.apache.httpcomponents</groupId>
-				<artifactId>httpcore</artifactId>
-				<version>4.2.5</version>
-			</dependency>
-
-			<dependency>
-				<groupId>org.apache.httpcomponents</groupId>
-				<artifactId>httpclient</artifactId>
-				<version>4.2.6</version>
 			</dependency>
 
 			<dependency>
@@ -649,6 +666,27 @@ under the License.
 							</execution>
 						</executions>
 					</plugin>
+					<plugin>
+						<groupId>org.apache.maven.plugins</groupId>
+						<artifactId>maven-enforcer-plugin</artifactId>
+						<version>1.4.1</version>
+						<executions>
+							<execution>
+								<id>enforce-maven</id>
+								<goals>
+									<goal>enforce</goal>
+								</goals>
+								<configuration>
+									<rules>
+										<requireMavenVersion>
+											<!-- maven version must be lower than 3.3. See FLINK-3158 -->
+											<version>(,3.3)</version>
+										</requireMavenVersion>
+									</rules>
+								</configuration>
+							</execution>
+						</executions>
+					</plugin>
 				</plugins>
 				<pluginManagement>
 					<plugins>
@@ -788,7 +826,7 @@ under the License.
 						<exclude>flink-runtime-web/web-dashboard/assets/fonts/FontAwesome.otf</exclude>
 						<exclude>flink-runtime-web/web-dashboard/assets/fonts/fontawesome*</exclude>
 
-                        <!-- generated contents -->
+						<!-- generated contents -->
 						<exclude>flink-runtime-web/web-dashboard/web/**</exclude>
 
 						<!-- downloaded and generated web libraries. -->
@@ -811,13 +849,14 @@ under the License.
 						<exclude>**/flink-bin/conf/slaves</exclude>
 						<exclude>**/flink-bin/conf/masters</exclude>
 						<exclude>**/flink-bin/conf/zoo.cfg</exclude>
-                        <exclude>flink-contrib/docker-flink/flink/conf/slaves</exclude>
+						<exclude>flink-contrib/docker-flink/flink/conf/slaves</exclude>
 						<!-- Administrative files in the main trunk. -->
 						<exclude>**/README.md</exclude>
 						<exclude>CHANGELOG</exclude>
 						<exclude>CONTRIBUTING.md</exclude>
 						<exclude>CONTRIBUTORS</exclude>
 						<exclude>DEPENDENCIES</exclude>
+						<exclude>PULL_REQUEST_TEMPLATE.md</exclude>
 						<!-- Build files -->
 						<exclude>**/*.iml</exclude>
 						<exclude>flink-quickstart/**/testArtifact/goal.txt</exclude>
@@ -971,6 +1010,13 @@ under the License.
 							</filters>
 							<artifactSet>
 								<includes>
+									<!-- Unfortunately, the next line is necessary for now to force the execution
+									of the Shade plugin upon all sub modules. This will generate effective poms,
+									i.e. poms which do not contain properties which are derived from this root pom.
+									In particular, the Scala version properties are defined in the root pom and without
+									shading, the root pom would have to be Scala suffixed and thereby all other modules.
+									-->
+									<include>org.apache.flink:force-shading</include>
 									<include>com.google.guava:*</include>
 									<include>org.ow2.asm:*</include>
 								</includes>
@@ -1083,6 +1129,30 @@ under the License.
 								</pluginExecution>
 							</pluginExecutions>
 						</lifecycleMappingMetadata>
+					</configuration>
+				</plugin>
+
+				<!-- configure scala style -->
+				<plugin>
+					<groupId>org.scalastyle</groupId>
+					<artifactId>scalastyle-maven-plugin</artifactId>
+					<version>0.5.0</version>
+					<executions>
+						<execution>
+							<goals>
+								<goal>check</goal>
+							</goals>
+						</execution>
+					</executions>
+					<configuration>
+						<verbose>false</verbose>
+						<failOnViolation>true</failOnViolation>
+						<includeTestSourceDirectory>true</includeTestSourceDirectory>
+						<failOnWarning>false</failOnWarning>
+						<sourceDirectory>${basedir}/src/main/scala</sourceDirectory>
+						<testSourceDirectory>${basedir}/src/test/scala</testSourceDirectory>
+						<outputFile>${project.basedir}/target/scalastyle-output.xml</outputFile>
+						<outputEncoding>UTF-8</outputEncoding>
 					</configuration>
 				</plugin>
 			</plugins>

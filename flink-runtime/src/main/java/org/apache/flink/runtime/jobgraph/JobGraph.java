@@ -18,6 +18,7 @@
 
 package org.apache.flink.runtime.jobgraph;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
@@ -33,12 +34,12 @@ import java.io.Serializable;
 import java.net.InetSocketAddress;
 import java.net.URL;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Collections;
 import java.util.Set;
 
 /**
@@ -78,11 +79,6 @@ public class JobGraph implements Serializable {
 	/** Name of this job. */
 	private final String jobName;
 
-	/** The number of times that failed tasks should be re-executed */
-	private int numExecutionRetries;
-
-	private long executionRetryDelay;
-
 	/** The number of seconds after which the corresponding ExecutionGraph is removed at the
 	 * job manager after it has been executed. */
 	private long sessionTimeout = 0;
@@ -97,65 +93,82 @@ public class JobGraph implements Serializable {
 	private JobSnapshottingSettings snapshotSettings;
 
 	/** List of classpaths required to run this job. */
-	private List<URL> classpaths = Collections.<URL>emptyList();
+	private List<URL> classpaths = Collections.emptyList();
+
+	/** Job specific execution config */
+	private ExecutionConfig executionConfig;
 
 	// --------------------------------------------------------------------------------------------
 
 	/**
-	 * Constructs a new job graph with no name and a random job ID.
-	 */
-	public JobGraph() {
-		this((String) null);
-	}
-
-	/**
-	 * Constructs a new job graph with the given name, a random job ID.
+	 * Constructs a new job graph with no name, a random job ID, and the given
+	 * {@link ExecutionConfig}.
 	 *
-	 * @param jobName The name of the job
+	 * @param config The {@link ExecutionConfig} for the job.
 	 */
-	public JobGraph(String jobName) {
-		this(null, jobName);
+	public JobGraph(ExecutionConfig config) {
+		this(null, config);
 	}
 
 	/**
-	 * Constructs a new job graph with the given name and a random job ID if null supplied as an id.
+	 * Constructs a new job graph with the given name, the given {@link ExecutionConfig},
+	 * and a random job ID.
+	 *
+	 * @param jobName The name of the job.
+	 * @param config The execution configuration of the job.
+	 */
+	public JobGraph(String jobName, ExecutionConfig config) {
+		this(null, jobName, config);
+	}
+
+	/**
+	 * Constructs a new job graph with the given job ID (or a random ID, if {@code null} is passed),
+	 * the given name and the given execution configuration (see {@link ExecutionConfig}).
 	 *
 	 * @param jobId The id of the job. A random ID is generated, if {@code null} is passed.
 	 * @param jobName The name of the job.
+	 * @param config The execution configuration of the job.
 	 */
-	public JobGraph(JobID jobId, String jobName) {
+	public JobGraph(JobID jobId, String jobName, ExecutionConfig config) {
 		this.jobID = jobId == null ? new JobID() : jobId;
 		this.jobName = jobName == null ? "(unnamed job)" : jobName;
+		this.executionConfig = config == null ? new ExecutionConfig() : config;
 	}
 
 	/**
-	 * Constructs a new job graph with no name and a random job ID if null supplied as an id.
+	 * Constructs a new job graph with no name, a random job ID, the given {@link ExecutionConfig}, and
+	 * the given job vertices.
 	 *
+	 * @param config The execution configuration of the job.
 	 * @param vertices The vertices to add to the graph.
 	 */
-	public JobGraph(JobVertex... vertices) {
-		this(null, vertices);
+	public JobGraph(ExecutionConfig config, JobVertex... vertices) {
+		this(null, config, vertices);
 	}
 
 	/**
-	 * Constructs a new job graph with the given name and a random job ID.
+	 * Constructs a new job graph with the given name, the given {@link ExecutionConfig}, a random job ID,
+	 * and the given job vertices.
 	 *
 	 * @param jobName The name of the job.
+	 * @param config The execution configuration of the job.
 	 * @param vertices The vertices to add to the graph.
 	 */
-	public JobGraph(String jobName, JobVertex... vertices) {
-		this(null, jobName, vertices);
+	public JobGraph(String jobName, ExecutionConfig config, JobVertex... vertices) {
+		this(null, jobName, config, vertices);
 	}
 
 	/**
-	 * Constructs a new job graph with the given name and a random job ID if null supplied as an id.
+	 * Constructs a new job graph with the given name, the given {@link ExecutionConfig},
+	 * the given jobId or a random one if null supplied, and the given job vertices.
 	 *
 	 * @param jobId The id of the job. A random ID is generated, if {@code null} is passed.
 	 * @param jobName The name of the job.
+	 * @param config The execution configuration of the job.
 	 * @param vertices The vertices to add to the graph.
 	 */
-	public JobGraph(JobID jobId, String jobName, JobVertex... vertices) {
-		this(jobId, jobName);
+	public JobGraph(JobID jobId, String jobName, ExecutionConfig config, JobVertex... vertices) {
+		this(jobId, jobName, config);
 
 		for (JobVertex vertex : vertices) {
 			addVertex(vertex);
@@ -193,54 +206,12 @@ public class JobGraph implements Serializable {
 	}
 
 	/**
-	 * Sets the number of times that failed tasks are re-executed. A value of zero
-	 * effectively disables fault tolerance. A value of {@code -1} indicates that the system
-	 * default value (as defined in the configuration) should be used.
+	 * Returns the {@link ExecutionConfig}
 	 *
-	 * @param numberOfExecutionRetries The number of times the system will try to re-execute failed tasks.
+	 * @return ExecutionConfig
 	 */
-	public void setNumberOfExecutionRetries(int numberOfExecutionRetries) {
-		if (numberOfExecutionRetries < -1) {
-			throw new IllegalArgumentException(
-					"The number of execution retries must be non-negative, or -1 (use system default)");
-		}
-		this.numExecutionRetries = numberOfExecutionRetries;
-	}
-
-	/**
-	 * Gets the number of times the system will try to re-execute failed tasks. A value
-	 * of {@code -1} indicates that the system default value (as defined in the configuration)
-	 * should be used.
-	 *
-	 * @return The number of times the system will try to re-execute failed tasks.
-	 */
-	public int getNumberOfExecutionRetries() {
-		return numExecutionRetries;
-	}
-
-	/**
-	 * Gets the delay of time the system will try to re-execute failed tasks. A value of
-	 * {@code -1} indicates the system default value (as defined in the configuration)
-	 * should be used.
-	 * @return The delay of time in milliseconds the system will try to re-execute failed tasks.
-	 */
-	public long getExecutionRetryDelay() {
-		return executionRetryDelay;
-	}
-
-	/**
-	 * Sets the delay that failed tasks are re-executed. A value of zero
-	 * effectively disables fault tolerance. A value of {@code -1} indicates that the system
-	 * default value (as defined in the configuration) should be used.
-	 *
-	 * @param executionRetryDelay The delay of time the system will wait to re-execute failed tasks.
-	 */
-	public void setExecutionRetryDelay(long executionRetryDelay){
-		if (executionRetryDelay < -1) {
-			throw new IllegalArgumentException(
-					"The delay between reties must be non-negative, or -1 (use system default)");
-		}
-		this.executionRetryDelay = executionRetryDelay;
+	public ExecutionConfig getExecutionConfig() {
+		return executionConfig;
 	}
 
 	/**

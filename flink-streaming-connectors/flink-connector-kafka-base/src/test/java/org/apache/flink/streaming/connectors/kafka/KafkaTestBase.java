@@ -17,9 +17,6 @@
 
 package org.apache.flink.streaming.connectors.kafka;
 
-import kafka.consumer.ConsumerConfig;
-
-
 import org.apache.flink.client.program.ProgramInvocationException;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
@@ -29,7 +26,6 @@ import org.apache.flink.test.util.ForkableFlinkMiniCluster;
 import org.apache.flink.test.util.SuccessException;
 import org.apache.flink.util.InstantiationUtil;
 import org.apache.flink.util.TestLogger;
-
 
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -66,7 +62,6 @@ public abstract class KafkaTestBase extends TestLogger {
 
 	protected static String brokerConnectionStrings;
 
-	protected static ConsumerConfig standardCC;
 	protected static Properties standardProps;
 	
 	protected static ForkableFlinkMiniCluster flink;
@@ -84,7 +79,7 @@ public abstract class KafkaTestBase extends TestLogger {
 	@BeforeClass
 	public static void prepare() throws IOException, ClassNotFoundException {
 		LOG.info("-------------------------------------------------------------------------");
-		LOG.info("    Starting KafkaITCase ");
+		LOG.info("    Starting KafkaTestBase ");
 		LOG.info("-------------------------------------------------------------------------");
 		
 
@@ -93,12 +88,11 @@ public abstract class KafkaTestBase extends TestLogger {
 		Class<?> clazz = Class.forName("org.apache.flink.streaming.connectors.kafka.KafkaTestEnvironmentImpl");
 		kafkaServer = (KafkaTestEnvironment) InstantiationUtil.instantiate(clazz);
 
-		LOG.info("Starting KafkaITCase.prepare() for Kafka " + kafkaServer.getVersion());
+		LOG.info("Starting KafkaTestBase.prepare() for Kafka " + kafkaServer.getVersion());
 
 		kafkaServer.prepare(NUMBER_OF_KAFKA_SERVERS);
 
 		standardProps = kafkaServer.getStandardProperties();
-		standardCC = kafkaServer.getStandardConsumerConfig();
 		brokerConnectionStrings = kafkaServer.getBrokerConnectionString();
 
 		// start also a re-usable Flink mini cluster
@@ -106,7 +100,7 @@ public abstract class KafkaTestBase extends TestLogger {
 		flinkConfig.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, 1);
 		flinkConfig.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 8);
 		flinkConfig.setInteger(ConfigConstants.TASK_MANAGER_MEMORY_SIZE_KEY, 16);
-		flinkConfig.setString(ConfigConstants.EXECUTION_RETRY_DELAY_KEY, "0 s");
+		flinkConfig.setString(ConfigConstants.RESTART_STRATEGY_FIXED_DELAY_DELAY, "0 s");
 
 		flink = new ForkableFlinkMiniCluster(flinkConfig, false);
 		flink.start();
@@ -118,7 +112,7 @@ public abstract class KafkaTestBase extends TestLogger {
 	public static void shutDownServices() {
 
 		LOG.info("-------------------------------------------------------------------------");
-		LOG.info("    Shut down KafkaITCase ");
+		LOG.info("    Shut down KafkaTestBase ");
 		LOG.info("-------------------------------------------------------------------------");
 
 		flinkPort = -1;
@@ -129,7 +123,7 @@ public abstract class KafkaTestBase extends TestLogger {
 		kafkaServer.shutdown();
 
 		LOG.info("-------------------------------------------------------------------------");
-		LOG.info("    KafkaITCase finished"); 
+		LOG.info("    KafkaTestBase finished");
 		LOG.info("-------------------------------------------------------------------------");
 	}
 

@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.api.functions.source;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
@@ -48,6 +49,7 @@ import java.util.List;
  * @param <SessionId> The type of the IDs that are used for acknowledging elements
  *                    (ids valid during session).
  */
+@PublicEvolving
 public abstract class MultipleIdsMessageAcknowledgingSourceBase<Type, UId, SessionId>
 		extends MessageAcknowledgingSourceBase<Type, UId> {
 
@@ -107,16 +109,14 @@ public abstract class MultipleIdsMessageAcknowledgingSourceBase<Type, UId, Sessi
 	 */
 	protected final void acknowledgeIDs(long checkpointId, List<UId> uniqueIds) {
 		LOG.debug("Acknowledging ids for checkpoint {}", checkpointId);
-		synchronized (sessionIdsPerSnapshot) {
-			Iterator<Tuple2<Long, List<SessionId>>> iterator = sessionIdsPerSnapshot.iterator();
-			while (iterator.hasNext()) {
-				final Tuple2<Long, List<SessionId>> next = iterator.next();
-				long id = next.f0;
-				if (id <= checkpointId) {
-					acknowledgeSessionIDs(next.f1);
-					// remove ids for this session
-					iterator.remove();
-				}
+		Iterator<Tuple2<Long, List<SessionId>>> iterator = sessionIdsPerSnapshot.iterator();
+		while (iterator.hasNext()) {
+			final Tuple2<Long, List<SessionId>> next = iterator.next();
+			long id = next.f0;
+			if (id <= checkpointId) {
+				acknowledgeSessionIDs(next.f1);
+				// remove ids for this session
+				iterator.remove();
 			}
 		}
 	}
@@ -134,10 +134,8 @@ public abstract class MultipleIdsMessageAcknowledgingSourceBase<Type, UId, Sessi
 
 	@Override
 	public SerializedCheckpointData[] snapshotState(long checkpointId, long checkpointTimestamp) throws Exception {
-		synchronized (sessionIdsPerSnapshot) {
-			sessionIdsPerSnapshot.add(new Tuple2<>(checkpointId, sessionIds));
-			sessionIds = new ArrayList<>(64);
-		}
+		sessionIdsPerSnapshot.add(new Tuple2<>(checkpointId, sessionIds));
+		sessionIds = new ArrayList<>(64);
 		return super.snapshotState(checkpointId, checkpointTimestamp);
 	}
 }

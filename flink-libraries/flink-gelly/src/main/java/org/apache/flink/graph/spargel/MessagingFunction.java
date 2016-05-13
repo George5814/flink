@@ -33,7 +33,7 @@ import org.apache.flink.types.Value;
 import org.apache.flink.util.Collector;
 
 /**
- * The base class for functions that produce messages between vertices as a part of a {@link VertexCentricIteration}.
+ * The base class for functions that produce messages between vertices as a part of a {@link ScatterGatherIteration}.
  * 
  * @param <K> The type of the vertex key (the vertex identifier).
  * @param <VV> The type of the vertex value (the state of the vertex).
@@ -66,13 +66,13 @@ public abstract class MessagingFunction<K, VV, Message, EV> implements Serializa
 
 	// --------------------------------------------------------------------------------------------
 	//  Attribute that allows the user to choose the neighborhood type(in/out/all) on which to run
-	//  the vertex centric iteration.
+	//  the scatter gather iteration.
 	// --------------------------------------------------------------------------------------------
 
 	private EdgeDirection direction;
 
 	/**
-	 * Retrieves the edge direction in which messages are propagated in the vertex-centric iteration.
+	 * Retrieves the edge direction in which messages are propagated in the scatter-gather iteration.
 	 * @return the messaging {@link EdgeDirection}
 	 */
 	public EdgeDirection getDirection() {
@@ -98,14 +98,14 @@ public abstract class MessagingFunction<K, VV, Message, EV> implements Serializa
 	public abstract void sendMessages(Vertex<K, VV> vertex) throws Exception;
 	
 	/**
-	 * This method is executed one per superstep before the vertex update function is invoked for each vertex.
+	 * This method is executed once per superstep before the vertex update function is invoked for each vertex.
 	 * 
 	 * @throws Exception Exceptions in the pre-superstep phase cause the superstep to fail.
 	 */
 	public void preSuperstep() throws Exception {}
 	
 	/**
-	 * This method is executed one per superstep after the vertex update function has been invoked for each vertex.
+	 * This method is executed once per superstep after the vertex update function has been invoked for each vertex.
 	 * 
 	 * @throws Exception Exceptions in the post-superstep phase cause the superstep to fail.
 	 */
@@ -125,7 +125,7 @@ public abstract class MessagingFunction<K, VV, Message, EV> implements Serializa
 	@SuppressWarnings("unchecked")
 	public Iterable<Edge<K, EV>> getEdges() {
 		if (edgesUsed) {
-			throw new IllegalStateException("Can use either 'getEdges()' or 'sendMessageToAllTargets()' exactly once.");
+			throw new IllegalStateException("Can use either 'getEdges()' or 'sendMessageToAllNeighbors()' exactly once.");
 		}
 		edgesUsed = true;
 		this.edgeIterator.set((Iterator<Edge<K, EV>>) edges);
@@ -233,7 +233,7 @@ public abstract class MessagingFunction<K, VV, Message, EV> implements Serializa
 	/**
 	 * Gets the broadcast data set registered under the given name. Broadcast data sets
 	 * are available on all parallel instances of a function. They can be registered via
-	 * {@link org.apache.flink.graph.spargel.VertexCentricConfiguration#addBroadcastSetForMessagingFunction(String, org.apache.flink.api.java.DataSet)}.
+	 * {@link org.apache.flink.graph.spargel.ScatterGatherConfiguration#addBroadcastSetForMessagingFunction(String, org.apache.flink.api.java.DataSet)}.
 	 * 
 	 * @param name The name under which the broadcast set is registered.
 	 * @return The broadcast data set.

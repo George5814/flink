@@ -21,6 +21,7 @@ package org.apache.flink.streaming.runtime.streamrecord;
 import java.io.IOException;
 
 import com.google.common.base.Preconditions;
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataOutputView;
@@ -38,6 +39,7 @@ import org.apache.flink.core.memory.DataOutputView;
  *
  * @param <T> The type of value in the {@link StreamRecord}
  */
+@Internal
 public final class StreamRecordSerializer<T> extends TypeSerializer<StreamRecord<T>> {
 
 	private static final long serialVersionUID = 1L;
@@ -91,12 +93,12 @@ public final class StreamRecordSerializer<T> extends TypeSerializer<StreamRecord
 	
 	@Override
 	public StreamRecord<T> copy(StreamRecord<T> from) {
-		return new StreamRecord<T>(typeSerializer.copy(from.getValue()), from.getTimestamp());
+		return from.copy(typeSerializer.copy(from.getValue()));
 	}
 
 	@Override
 	public StreamRecord<T> copy(StreamRecord<T> from, StreamRecord<T> reuse) {
-		reuse.replace(typeSerializer.copy(from.getValue(), reuse.getValue()), 0);
+		from.copyTo(typeSerializer.copy(from.getValue(), reuse.getValue()), reuse);
 		return reuse;
 	}
 
@@ -107,14 +109,13 @@ public final class StreamRecordSerializer<T> extends TypeSerializer<StreamRecord
 	
 	@Override
 	public StreamRecord<T> deserialize(DataInputView source) throws IOException {
-		T element = typeSerializer.deserialize(source);
-		return new StreamRecord<T>(element, 0);
+		return new StreamRecord<T>(typeSerializer.deserialize(source));
 	}
 
 	@Override
 	public StreamRecord<T> deserialize(StreamRecord<T> reuse, DataInputView source) throws IOException {
 		T element = typeSerializer.deserialize(reuse.getValue(), source);
-		reuse.replace(element, 0);
+		reuse.replace(element);
 		return reuse;
 	}
 
@@ -123,6 +124,8 @@ public final class StreamRecordSerializer<T> extends TypeSerializer<StreamRecord
 		typeSerializer.copy(source, target);
 	}
 
+	// ------------------------------------------------------------------------
+	
 	@Override
 	public boolean equals(Object obj) {
 		if (obj instanceof StreamRecordSerializer) {

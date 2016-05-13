@@ -17,6 +17,9 @@
 
 package org.apache.flink.streaming.api.datastream;
 
+import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.annotation.Internal;
+import org.apache.flink.annotation.Public;
 import org.apache.flink.streaming.api.operators.ChainingStrategy;
 import org.apache.flink.streaming.api.operators.StreamSink;
 import org.apache.flink.streaming.api.transformations.SinkTransformation;
@@ -26,6 +29,7 @@ import org.apache.flink.streaming.api.transformations.SinkTransformation;
  *
  * @param <T> The type of the elements in the Stream
  */
+@Public
 public class DataStreamSink<T> {
 
 	SinkTransformation<T> transformation;
@@ -38,6 +42,7 @@ public class DataStreamSink<T> {
 	/**
 	 * Returns the transformation that contains the actual sink operator of this sink.
 	 */
+	@Internal
 	public SinkTransformation<T> getTransformation() {
 		return transformation;
 	}
@@ -65,6 +70,7 @@ public class DataStreamSink<T> {
 	 * @param uid The unique user-specified ID of this transformation.
 	 * @return The operator with the specified ID.
 	 */
+	@PublicEvolving
 	public DataStreamSink<T> uid(String uid) {
 		transformation.setUid(uid);
 		return this;
@@ -92,8 +98,28 @@ public class DataStreamSink<T> {
 	 *
 	 * @return The sink with chaining disabled
 	 */
+	@PublicEvolving
 	public DataStreamSink<T> disableChaining() {
 		this.transformation.setChainingStrategy(ChainingStrategy.NEVER);
+		return this;
+	}
+
+	/**
+	 * Sets the slot sharing group of this operation. Parallel instances of
+	 * operations that are in the same slot sharing group will be co-located in the same
+	 * TaskManager slot, if possible.
+	 *
+	 * <p>Operations inherit the slot sharing group of input operations if all input operations
+	 * are in the same slot sharing group and no slot sharing group was explicitly specified.
+	 *
+	 * <p>Initially an operation is in the default slot sharing group. An operation can be put into
+	 * the default group explicitly by setting the slot sharing group to {@code "default"}.
+	 *
+	 * @param slotSharingGroup The slot sharing group name.
+	 */
+	@PublicEvolving
+	public DataStreamSink<T> slotSharingGroup(String slotSharingGroup) {
+		transformation.setSlotSharingGroup(slotSharingGroup);
 		return this;
 	}
 }

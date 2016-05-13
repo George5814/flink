@@ -86,7 +86,7 @@ takes the path(s) to the JAR file(s).
 ## Linking with modules not contained in the binary distribution
 
 The binary distribution contains jar packages in the `lib` folder that are automatically
-provided to the classpath of your distrbuted programs. Almost all of Flink classes are
+provided to the classpath of your distributed programs. Almost all of Flink classes are
 located there with a few exceptions, for example the streaming connectors and some freshly
 added modules. To run code depending on these modules you need to make them accessible
 during runtime, for which we suggest two options:
@@ -101,12 +101,11 @@ The latter version is recommended as it respects the classloader management in F
 
 To provide these dependencies not included by Flink we suggest two options with Maven.
 
-1. The maven assembly plugin builds a so-called uber-jar(executable jar)
-containing all your dependencies.
-Assembly configuration is straight-forward, but the resulting jar might become bulky. See
-[usage](http://maven.apache.org/plugins/maven-assembly-plugin/usage.html).
-2. The maven unpack plugin, for unpacking the relevant parts of the dependencies and
-then package it with your code.
+1. The maven assembly plugin builds a so-called uber-jar (executable jar) containing all your dependencies.
+The assembly configuration is straight-forward, but the resulting jar might become bulky. 
+See [maven-assembly-plugin](http://maven.apache.org/plugins/maven-assembly-plugin/usage.html) for further information.
+2. The maven unpack plugin unpacks the relevant parts of the dependencies and
+then packages it with your code.
 
 Using the latter approach in order to bundle the Kafka connector, `flink-connector-kafka`
 you would need to add the classes from both the connector and the Kafka API itself. Add

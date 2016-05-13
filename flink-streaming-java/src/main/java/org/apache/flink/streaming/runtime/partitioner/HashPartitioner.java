@@ -17,8 +17,10 @@
 
 package org.apache.flink.streaming.runtime.partitioner;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.runtime.plugable.SerializationDelegate;
+import org.apache.flink.util.MathUtils;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /**
@@ -27,6 +29,7 @@ import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
  *
  * @param <T> Type of the elements in the Stream being partitioned
  */
+@Internal
 public class HashPartitioner<T> extends StreamPartitioner<T> {
 	private static final long serialVersionUID = 1L;
 
@@ -46,7 +49,7 @@ public class HashPartitioner<T> extends StreamPartitioner<T> {
 		} catch (Exception e) {
 			throw new RuntimeException("Could not extract key from " + record.getInstance().getValue(), e);
 		}
-		returnArray[0] = Math.abs(key.hashCode() % numberOfOutputChannels);
+		returnArray[0] = MathUtils.murmurHash(key.hashCode()) % numberOfOutputChannels;
 
 		return returnArray;
 	}

@@ -18,6 +18,7 @@
 
 package org.apache.flink.util;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
@@ -30,6 +31,7 @@ import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.ObjectStreamClass;
+import java.io.Serializable;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
@@ -37,6 +39,7 @@ import java.util.HashMap;
 /**
  * Utility class to create instances from class objects and checking failure reasons.
  */
+@Internal
 public final class InstantiationUtil {
 	
 	/**
@@ -296,6 +299,45 @@ public final class InstantiationUtil {
 				ObjectOutputStream oos = new ObjectOutputStream(baos)) {
 			oos.writeObject(o);
 			return baos.toByteArray();
+		}
+	}
+
+	/**
+	 * Clones the given serializable object using Java serialization.
+	 *
+	 * @param obj Object to clone
+	 * @param <T> Type of the object to clone
+	 * @return Cloned object
+	 * @throws IOException
+	 * @throws ClassNotFoundException
+	 */
+	public static <T extends Serializable> T clone(T obj) throws IOException, ClassNotFoundException {
+		if (obj == null) {
+			return null;
+		} else {
+			return clone(obj, obj.getClass().getClassLoader());
+		}
+	}
+
+	/**
+	 * Clones the given serializable object using Java serialization, using the given classloader to
+	 * resolve the cloned classes.
+	 *
+	 * @param obj Object to clone
+	 * @param classLoader The classloader to resolve the classes during deserialization.
+	 * @param <T> Type of the object to clone
+	 * 
+	 * @return Cloned object
+	 * 
+	 * @throws IOException
+	 * @throws ClassNotFoundException
+	 */
+	public static <T extends Serializable> T clone(T obj, ClassLoader classLoader) throws IOException, ClassNotFoundException {
+		if (obj == null) {
+			return null;
+		} else {
+			final byte[] serializedObject = serializeObject(obj);
+			return deserializeObject(serializedObject, classLoader);
 		}
 	}
 	

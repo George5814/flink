@@ -18,6 +18,7 @@
 
 package org.apache.flink.api.java.io;
 
+import org.apache.flink.annotation.PublicEvolving;
 import org.apache.flink.api.common.InvalidProgramException;
 import org.apache.flink.api.common.functions.Partitioner;
 import org.apache.flink.api.common.operators.GenericDataSourceBase;
@@ -25,7 +26,7 @@ import org.apache.flink.api.common.operators.Order;
 import org.apache.flink.api.common.operators.Ordering;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.operators.DataSource;
-import org.apache.flink.api.java.operators.Keys;
+import org.apache.flink.api.common.operators.Keys;
 
 import java.util.Arrays;
 
@@ -55,6 +56,7 @@ import java.util.Arrays;
  * @see org.apache.flink.api.common.io.InputFormat
  * @see org.apache.flink.api.java.operators.DataSource
  */
+@PublicEvolving
 public class SplitDataProperties<T> implements GenericDataSourceBase.SplitDataProperties<T> {
 
 	private TypeInformation<T> type;

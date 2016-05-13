@@ -51,6 +51,7 @@ angular.module('flinkApp')
   $scope.vertices = null
   $scope.jobCheckpointStats = null
   $scope.showHistory = false
+  $scope.backPressureOperatorStats = {}
 
   JobsService.loadJob($stateParams.jobid).then (data) ->
     $scope.job = data
@@ -70,12 +71,18 @@ angular.module('flinkApp')
     $scope.plan = null
     $scope.vertices = null
     $scope.jobCheckpointStats = null
+    $scope.backPressureOperatorStats = null
 
     $interval.cancel(refresher)
 
   $scope.cancelJob = (cancelEvent) ->
     angular.element(cancelEvent.currentTarget).removeClass("btn").removeClass("btn-default").html('Cancelling...')
     JobsService.cancelJob($stateParams.jobid).then (data) ->
+      {}
+
+  $scope.stopJob = (stopEvent) ->
+    angular.element(stopEvent.currentTarget).removeClass("btn").removeClass("btn-default").html('Stopping...')
+    JobsService.stopJob($stateParams.jobid).then (data) ->
       {}
 
   $scope.toggleHistory = ->
@@ -121,18 +128,33 @@ angular.module('flinkApp')
 
 # --------------------------------------
 
-.controller 'JobPlanOverviewController', ($scope, JobsService) ->
-  console.log 'JobPlanOverviewController'
+.controller 'JobPlanSubtasksController', ($scope, JobsService) ->
+  console.log 'JobPlanSubtasksController'
 
   if $scope.nodeid and (!$scope.vertex or !$scope.vertex.st)
     JobsService.getSubtasks($scope.nodeid).then (data) ->
       $scope.subtasks = data
 
   $scope.$on 'reload', (event) ->
-    console.log 'JobPlanOverviewController'
+    console.log 'JobPlanSubtasksController'
     if $scope.nodeid
       JobsService.getSubtasks($scope.nodeid).then (data) ->
         $scope.subtasks = data
+
+# --------------------------------------
+
+.controller 'JobPlanTaskManagersController', ($scope, JobsService) ->
+  console.log 'JobPlanTaskManagersController'
+
+  if $scope.nodeid and (!$scope.vertex or !$scope.vertex.st)
+    JobsService.getTaskManagers($scope.nodeid).then (data) ->
+      $scope.taskmanagers = data
+
+  $scope.$on 'reload', (event) ->
+    console.log 'JobPlanTaskManagersController'
+    if $scope.nodeid
+      JobsService.getTaskManagers($scope.nodeid).then (data) ->
+        $scope.taskmanagers = data
 
 # --------------------------------------
 
@@ -176,6 +198,24 @@ angular.module('flinkApp')
       JobsService.getOperatorCheckpointStats($scope.nodeid).then (data) ->
         $scope.operatorCheckpointStats = data.operatorStats
         $scope.subtasksCheckpointStats = data.subtasksStats
+
+# --------------------------------------
+
+.controller 'JobPlanBackPressureController', ($scope, JobsService) ->
+  console.log 'JobPlanBackPressureController'
+  $scope.now = Date.now()
+
+  if $scope.nodeid
+    JobsService.getOperatorBackPressure($scope.nodeid).then (data) ->
+      $scope.backPressureOperatorStats[$scope.nodeid] = data
+
+  $scope.$on 'reload', (event) ->
+    console.log 'JobPlanBackPressureController (relaod)'
+    $scope.now = Date.now()
+
+    if $scope.nodeid
+      JobsService.getOperatorBackPressure($scope.nodeid).then (data) ->
+        $scope.backPressureOperatorStats[$scope.nodeid] = data
 
 # --------------------------------------
 

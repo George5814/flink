@@ -29,6 +29,7 @@ import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.jobgraph.JobVertex;
+import org.apache.flink.util.MathUtils;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.datastream.IterativeStream;
@@ -68,7 +69,7 @@ public class IterateTest extends StreamingMultipleProgramsTestBase {
 		DataStream<Integer> source = env.fromElements(1, 10);
 
 		IterativeStream<Integer> iter1 = source.iterate();
-		SingleOutputStreamOperator<Integer, ?> map1 = iter1.map(NoOpIntMap);
+		SingleOutputStreamOperator<Integer> map1 = iter1.map(NoOpIntMap);
 		iter1.closeWith(map1).print();
 	}
 
@@ -289,8 +290,9 @@ public class IterateTest extends StreamingMultipleProgramsTestBase {
 		IterativeStream<Integer> iter1 = source1.union(source2).iterate();
 
 		DataStream<Integer> head1 = iter1.map(NoOpIntMap).name("map1");
-		DataStream<Integer> head2 = iter1.map(NoOpIntMap).setParallelism(DEFAULT_PARALLELISM / 2).rebalance().name(
-				"shuffle");
+		DataStream<Integer> head2 = iter1.map(NoOpIntMap)
+				.setParallelism(DEFAULT_PARALLELISM / 2)
+				.name("shuffle").rebalance();
 		DataStreamSink<Integer> head3 = iter1.map(NoOpIntMap).setParallelism(DEFAULT_PARALLELISM / 2)
 				.addSink(new ReceiveCheckNoOpSink<Integer>());
 		DataStreamSink<Integer> head4 = iter1.map(NoOpIntMap).addSink(new ReceiveCheckNoOpSink<Integer>());
@@ -302,7 +304,7 @@ public class IterateTest extends StreamingMultipleProgramsTestBase {
 
 		iter1.closeWith(
 				source3.select("even").union(
-						head1.map(NoOpIntMap).broadcast().name("bc"),
+						head1.map(NoOpIntMap).name("bc").broadcast(),
 						head2.map(NoOpIntMap).shuffle()));
 
 		StreamGraph graph = env.getStreamGraph();
@@ -460,6 +462,15 @@ public class IterateTest extends StreamingMultipleProgramsTestBase {
 		assertEquals(Arrays.asList("1", "1", "2", "2", "2", "2"), TestSink.collected);
 	}
 
+	/**
+	 * This test relies on the hash function used by the {@link DataStream#keyBy}, which is
+	 * assumed to be {@link MathUtils#murmurHash}.
+	 *
+	 * For the test to pass all FlatMappers must see at least two records in the iteration,
+	 * which can only be achieved if the hashed values of the input keys map to a complete
+	 * congruence system. Given that the test is designed for 3 parallel FlatMapper instances
+	 * keys chosen from the [1,3] range are a suitable choice.
+     */
 	@Test
 	public void testGroupByFeedback() throws Exception {
 		StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -487,9 +498,9 @@ public class IterateTest extends StreamingMultipleProgramsTestBase {
 			public void flatMap(Integer value, Collector<Integer> out) throws Exception {
 				received++;
 				if (key == -1) {
-					key = value % 3;
+					key = MathUtils.murmurHash(value % 3) % 3;
 				} else {
-					assertEquals(key, value % 3);
+					assertEquals(key, MathUtils.murmurHash(value % 3) % 3);
 				}
 				if (value > 0) {
 					out.collect(value - 1);

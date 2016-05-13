@@ -18,6 +18,7 @@
 
 package org.apache.flink.streaming.connectors.kafka.testutils;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -34,6 +35,7 @@ import org.apache.flink.streaming.util.serialization.KeyedSerializationSchemaWra
 import org.apache.flink.streaming.util.serialization.SimpleStringSchema;
 import org.apache.flink.streaming.util.serialization.TypeInformationSerializationSchema;
 
+import java.util.Properties;
 import java.util.Random;
 
 @SuppressWarnings("serial")
@@ -48,7 +50,7 @@ public class DataGenerators {
 
 		env.setParallelism(numPartitions);
 		env.getConfig().disableSysoutLogging();
-		env.setNumberOfExecutionRetries(0);
+		env.setRestartStrategy(RestartStrategies.noRestart());
 		
 		DataStream<Tuple2<Integer, Integer>> stream =env.addSource(
 				new RichParallelSourceFunction<Tuple2<Integer, Integer>>() {
@@ -90,7 +92,7 @@ public class DataGenerators {
 														 final boolean randomizeOrder) throws Exception {
 		env.setParallelism(numPartitions);
 		env.getConfig().disableSysoutLogging();
-		env.setNumberOfExecutionRetries(0);
+		env.setRestartStrategy(RestartStrategies.noRestart());
 
 		DataStream<Integer> stream = env.addSource(
 				new RichParallelSourceFunction<Integer>() {
@@ -171,9 +173,11 @@ public class DataGenerators {
 			// we manually feed data into the Kafka sink
 			FlinkKafkaProducerBase<String> producer = null;
 			try {
+				Properties producerProperties = FlinkKafkaProducerBase.getPropertiesFromBrokerList(server.getBrokerConnectionString());
+				producerProperties.setProperty("retries", "3");
 				producer = server.getProducer(topic,
 						new KeyedSerializationSchemaWrapper<>(new SimpleStringSchema()),
-						FlinkKafkaProducerBase.getPropertiesFromBrokerList(server.getBrokerConnectionString()), new FixedPartitioner<String>());
+						producerProperties, new FixedPartitioner<String>());
 				producer.setRuntimeContext(new MockRuntimeContext(1,0));
 				producer.open(new Configuration());
 				

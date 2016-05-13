@@ -19,12 +19,15 @@
 package org.apache.flink.runtime.checkpoint;
 
 import akka.actor.ActorSystem;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.akka.AkkaUtils;
 import org.apache.flink.runtime.blob.BlobKey;
+import org.apache.flink.runtime.checkpoint.stats.DisabledCheckpointStatsTracker;
 import org.apache.flink.runtime.executiongraph.ExecutionGraph;
 import org.apache.flink.runtime.executiongraph.ExecutionJobVertex;
+import org.apache.flink.runtime.executiongraph.restart.NoRestartStrategy;
 import org.apache.flink.runtime.jobmanager.RecoveryMode;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.junit.Test;
@@ -43,14 +46,16 @@ public class ExecutionGraphCheckpointCoordinatorTest {
 	@Test
 	public void testCheckpointAndSavepointCoordinatorShareCheckpointIDCounter() throws Exception {
 		ExecutionGraph executionGraph = new ExecutionGraph(
-				TestingUtils.defaultExecutionContext(),
-				new JobID(),
-				"test",
-				new Configuration(),
-				new FiniteDuration(1, TimeUnit.DAYS),
-				Collections.<BlobKey>emptyList(),
-				Collections.<URL>emptyList(),
-				ClassLoader.getSystemClassLoader());
+			TestingUtils.defaultExecutionContext(),
+			new JobID(),
+			"test",
+			new Configuration(),
+			new ExecutionConfig(),
+			new FiniteDuration(1, TimeUnit.DAYS),
+			new NoRestartStrategy(),
+			Collections.<BlobKey>emptyList(),
+			Collections.<URL>emptyList(),
+			ClassLoader.getSystemClassLoader());
 
 		ActorSystem actorSystem = AkkaUtils.createDefaultActorSystem();
 
@@ -60,6 +65,7 @@ public class ExecutionGraphCheckpointCoordinatorTest {
 					100,
 					100,
 					1,
+					42,
 					Collections.<ExecutionJobVertex>emptyList(),
 					Collections.<ExecutionJobVertex>emptyList(),
 					Collections.<ExecutionJobVertex>emptyList(),
@@ -68,7 +74,8 @@ public class ExecutionGraphCheckpointCoordinatorTest {
 					new StandaloneCheckpointIDCounter(),
 					new StandaloneCompletedCheckpointStore(1, ClassLoader.getSystemClassLoader()),
 					RecoveryMode.STANDALONE,
-					new HeapStateStore<Savepoint>());
+					new HeapStateStore<CompletedCheckpoint>(),
+					new DisabledCheckpointStatsTracker());
 
 			CheckpointCoordinator checkpointCoordinator = executionGraph.getCheckpointCoordinator();
 			SavepointCoordinator savepointCoordinator = executionGraph.getSavepointCoordinator();

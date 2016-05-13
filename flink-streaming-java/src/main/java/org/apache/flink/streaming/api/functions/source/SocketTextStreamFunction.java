@@ -17,7 +17,8 @@
 
 package org.apache.flink.streaming.api.functions.source;
 
-import org.apache.flink.runtime.util.IOUtils;
+import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.util.IOUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -40,6 +41,7 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * <p>
  * The function can be set to reconnect to the server socket in case that the stream is closed on the server side.
  */
+@PublicEvolving
 public class SocketTextStreamFunction implements SourceFunction<String> {
 
 	private static final long serialVersionUID = 1L;

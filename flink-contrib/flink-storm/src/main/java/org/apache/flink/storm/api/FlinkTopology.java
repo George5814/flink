@@ -142,7 +142,7 @@ public class FlinkTopology {
 					getClass().getClassLoader()
 					);
 		} catch (IOException | ClassNotFoundException e) {
-			throw new RuntimeException("Failed to copy object.");
+			throw new RuntimeException("Failed to copy object.", e);
 		}
 	}
 
@@ -200,7 +200,7 @@ public class FlinkTopology {
 				SplitStream<SplitStreamType<Tuple>> splitSource = multiSource
 						.split(new StormStreamSelector<Tuple>());
 				for (String streamId : sourceStreams.keySet()) {
-					SingleOutputStreamOperator<Tuple, ?> outStream = splitSource.select(streamId)
+					SingleOutputStreamOperator<Tuple> outStream = splitSource.select(streamId)
 							.map(new SplitStreamMapper<Tuple>());
 					outStream.getTransformation().setOutputType(declarer.getOutputType(streamId));
 					outputStreams.put(streamId, outStream);
@@ -229,9 +229,24 @@ public class FlinkTopology {
 		boolean makeProgress = true;
 		while (bolts.size() > 0) {
 			if (!makeProgress) {
-				throw new RuntimeException(
-						"Unable to build Topology. Could not connect the following bolts: "
-								+ bolts.keySet());
+				StringBuilder strBld = new StringBuilder();
+				strBld.append("Unable to build Topology. Could not connect the following bolts:");
+				for (String boltId : bolts.keySet()) {
+					strBld.append("\n  ");
+					strBld.append(boltId);
+					strBld.append(": missing input streams [");
+					for (Entry<GlobalStreamId, Grouping> streams : unprocessdInputsPerBolt
+							.get(boltId)) {
+						strBld.append("'");
+						strBld.append(streams.getKey().get_streamId());
+						strBld.append("' from '");
+						strBld.append(streams.getKey().get_componentId());
+						strBld.append("'; ");
+					}
+					strBld.append("]");
+				}
+
+				throw new RuntimeException(strBld.toString());
 			}
 			makeProgress = false;
 
@@ -284,7 +299,7 @@ public class FlinkTopology {
 					inputStreams.put(streamId, processInput(boltId, userBolt, streamId, grouping, producer));
 				}
 
-				final SingleOutputStreamOperator<?, ?> outputStream = createOutput(boltId,
+				final SingleOutputStreamOperator<?> outputStream = createOutput(boltId,
 						userBolt, inputStreams);
 
 				if (common.is_set_parallelism_hint()) {
@@ -344,7 +359,7 @@ public class FlinkTopology {
 	}
 
 	@SuppressWarnings({ "unchecked", "rawtypes" })
-	private SingleOutputStreamOperator<?, ?> createOutput(String boltId, IRichBolt bolt,
+	private SingleOutputStreamOperator<?> createOutput(String boltId, IRichBolt bolt,
 			Map<GlobalStreamId, DataStream<Tuple>> inputStreams) {
 		assert (boltId != null);
 		assert (bolt != null);
@@ -388,7 +403,7 @@ public class FlinkTopology {
 		final HashMap<String, Fields> boltOutputs = this.outputStreams.get(boltId);
 		final FlinkOutputFieldsDeclarer declarer = this.declarers.get(boltId);
 
-		final SingleOutputStreamOperator<?, ?> outputStream;
+		final SingleOutputStreamOperator<?> outputStream;
 
 		if (boltOutputs.size() < 2) { // single output stream or sink
 			String outputStreamId;
@@ -400,7 +415,7 @@ public class FlinkTopology {
 
 			final TypeInformation<Tuple> outType = declarer.getOutputType(outputStreamId);
 
-			final SingleOutputStreamOperator<Tuple, ?> outStream;
+			final SingleOutputStreamOperator<Tuple> outStream;
 
 			// only one input
 			if(inputStreams.entrySet().size() == 1) {
@@ -426,7 +441,7 @@ public class FlinkTopology {
 			final TypeInformation<SplitStreamType<Tuple>> outType = (TypeInformation) TypeExtractor
 					.getForClass(SplitStreamType.class);
 
-			final SingleOutputStreamOperator<SplitStreamType<Tuple>, ?> multiStream;
+			final SingleOutputStreamOperator<SplitStreamType<Tuple>> multiStream;
 
 			// only one input
 			if(inputStreams.entrySet().size() == 1) {
@@ -449,7 +464,7 @@ public class FlinkTopology {
 				op.put(outputStreamId,
 						splitStream.select(outputStreamId).map(
 								new SplitStreamMapper<Tuple>()));
-				SingleOutputStreamOperator<Tuple, ?> outStream = splitStream
+				SingleOutputStreamOperator<Tuple> outStream = splitStream
 						.select(outputStreamId).map(new SplitStreamMapper<Tuple>());
 				outStream.getTransformation().setOutputType(declarer.getOutputType(outputStreamId));
 				op.put(outputStreamId, outStream);

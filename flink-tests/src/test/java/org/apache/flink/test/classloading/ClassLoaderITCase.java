@@ -35,15 +35,17 @@ import static org.junit.Assert.fail;
 
 public class ClassLoaderITCase {
 
-	private static final String INPUT_SPLITS_PROG_JAR_FILE = "target/customsplit-test-jar.jar";
+	private static final String INPUT_SPLITS_PROG_JAR_FILE = "customsplit-test-jar.jar";
 
-	private static final String STREAMING_INPUT_SPLITS_PROG_JAR_FILE = "target/streaming-customsplit-test-jar.jar";
+	private static final String STREAMING_INPUT_SPLITS_PROG_JAR_FILE = "streaming-customsplit-test-jar.jar";
 
-	private static final String STREAMING_PROG_JAR_FILE = "target/streamingclassloader-test-jar.jar";
+	private static final String STREAMING_PROG_JAR_FILE = "streamingclassloader-test-jar.jar";
 
-	private static final String STREAMING_CHECKPOINTED_PROG_JAR_FILE = "target/streaming-checkpointed-classloader-test-jar.jar";
+	private static final String STREAMING_CHECKPOINTED_PROG_JAR_FILE = "streaming-checkpointed-classloader-test-jar.jar";
 
-	private static final String KMEANS_JAR_PATH = "target/kmeans-test-jar.jar";
+	private static final String KMEANS_JAR_PATH = "kmeans-test-jar.jar";
+
+	private static final String USERCODETYPE_JAR_PATH = "usercodetype-test-jar.jar";
 
 	@Rule
 	public TemporaryFolder folder = new TemporaryFolder();
@@ -54,7 +56,6 @@ public class ClassLoaderITCase {
 			Configuration config = new Configuration();
 			config.setInteger(ConfigConstants.LOCAL_NUMBER_TASK_MANAGER, 2);
 			config.setInteger(ConfigConstants.TASK_MANAGER_NUM_TASK_SLOTS, 2);
-			config.setString(ConfigConstants.EXECUTION_RETRY_DELAY_KEY, "0 s");
 
 			// we need to use the "filesystem" state backend to ensure FLINK-2543 is not happening again.
 			config.setString(ConfigConstants.STATE_BACKEND, "filesystem");
@@ -136,6 +137,16 @@ public class ClassLoaderITCase {
 										"25"
 									});
 				kMeansProg.invokeInteractiveModeForExecution();
+
+				// test FLINK-3633
+				PackagedProgram userCodeTypeProg = new PackagedProgram(
+					new File(USERCODETYPE_JAR_PATH),
+					new String[] { USERCODETYPE_JAR_PATH,
+						"localhost",
+						String.valueOf(port),
+					});
+
+				userCodeTypeProg.invokeInteractiveModeForExecution();
 			}
 			finally {
 				testCluster.shutdown();

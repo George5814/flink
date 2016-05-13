@@ -19,7 +19,6 @@
 package org.apache.flink.runtime.checkpoint;
 
 import org.apache.commons.io.FileUtils;
-import org.apache.flink.api.common.ApplicationID;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.checkpoint.stats.DisabledCheckpointStatsTracker;
 import org.apache.flink.runtime.execution.ExecutionState;
@@ -35,6 +34,7 @@ import org.apache.flink.runtime.state.LocalStateHandle;
 import org.apache.flink.runtime.state.StateHandle;
 import org.apache.flink.runtime.testutils.CommonTestUtils;
 import org.apache.flink.util.SerializedValue;
+import org.apache.flink.util.TestLogger;
 import org.junit.Test;
 import scala.concurrent.Await;
 import scala.concurrent.Future;
@@ -71,7 +71,7 @@ import static org.mockito.Mockito.when;
 /**
  * Tests for the savepoint coordinator.
  */
-public class SavepointCoordinatorTest {
+public class SavepointCoordinatorTest extends TestLogger {
 
 	// ------------------------------------------------------------------------
 	// Trigger and acknowledge
@@ -82,7 +82,6 @@ public class SavepointCoordinatorTest {
 	 */
 	@Test
 	public void testSimpleTriggerSavepoint() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		long checkpointTimeout = 60 * 1000;
 		long timestamp = 1272635;
@@ -90,10 +89,9 @@ public class SavepointCoordinatorTest {
 				mockExecutionVertex(jobId),
 				mockExecutionVertex(jobId) };
 		MockCheckpointIdCounter checkpointIdCounter = new MockCheckpointIdCounter();
-		HeapStateStore<Savepoint> savepointStore = new HeapStateStore<>();
+		HeapStateStore<CompletedCheckpoint> savepointStore = new HeapStateStore<>();
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				checkpointTimeout,
 				vertices,
@@ -141,8 +139,8 @@ public class SavepointCoordinatorTest {
 		String savepointPath = Await.result(savepointPathFuture, FiniteDuration.Zero());
 
 		// Verify the savepoint
-		Savepoint savepoint = savepointStore.getState(savepointPath);
-		verifySavepoint(savepoint, appId, jobId, checkpointId, timestamp,
+		CompletedCheckpoint savepoint = savepointStore.getState(savepointPath);
+		verifySavepoint(savepoint, jobId, checkpointId, timestamp,
 				vertices);
 
 		// Verify all promises removed
@@ -158,7 +156,6 @@ public class SavepointCoordinatorTest {
 	@Test
 	@SuppressWarnings("unchecked")
 	public void testSimpleRollbackSavepoint() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 
 		ExecutionJobVertex[] jobVertices = new ExecutionJobVertex[] {
@@ -175,16 +172,16 @@ public class SavepointCoordinatorTest {
 			}
 		}
 
-		StateStore<Savepoint> savepointStore = new HeapStateStore<>();
+		MockCheckpointIdCounter idCounter = new MockCheckpointIdCounter();
+		StateStore<CompletedCheckpoint> savepointStore = new HeapStateStore<>();
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				triggerVertices,
 				ackVertices,
 				new ExecutionVertex[] {},
-				new MockCheckpointIdCounter(),
+				idCounter,
 				savepointStore);
 
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(1231273123);
@@ -200,25 +197,25 @@ public class SavepointCoordinatorTest {
 		assertNotNull(savepointPath);
 
 		// Rollback
-		assertEquals(appId, coordinator.restoreSavepoint(
-				createExecutionJobVertexMap(jobVertices),
-				savepointPath));
+		coordinator.restoreSavepoint(createExecutionJobVertexMap(jobVertices), savepointPath);
 
 		// Verify all executions have been reset
 		for (ExecutionVertex vertex : ackVertices) {
 			verify(vertex.getCurrentExecutionAttempt(), times(1)).setInitialState(
-					any(SerializedValue.class), anyLong());
+					any(SerializedValue.class), any(Map.class), anyLong());
 		}
 
 		// Verify all promises removed
 		assertEquals(0, getSavepointPromises(coordinator).size());
+
+		// Verify checkpoint ID counter started
+		assertTrue(idCounter.isStarted());
 
 		coordinator.shutdown();
 	}
 
 	@Test
 	public void testRollbackParallelismMismatch() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 
 		ExecutionJobVertex[] jobVertices = new ExecutionJobVertex[] {
@@ -235,10 +232,9 @@ public class SavepointCoordinatorTest {
 			}
 		}
 
-		StateStore<Savepoint> savepointStore = new HeapStateStore<>();
+		StateStore<CompletedCheckpoint> savepointStore = new HeapStateStore<>();
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				triggerVertices,
@@ -283,14 +279,12 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testRollbackStateStoreFailure() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionJobVertex jobVertex = mockExecutionJobVertex(jobId, new JobVertexID(), 4);
-		HeapStateStore<Savepoint> savepointStore = spy(
-				new HeapStateStore<Savepoint>());
+		HeapStateStore<CompletedCheckpoint> savepointStore = spy(
+				new HeapStateStore<CompletedCheckpoint>());
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				jobVertex.getTaskVertices(),
@@ -332,50 +326,17 @@ public class SavepointCoordinatorTest {
 	}
 
 	@Test
-	public void testRollbackUpdatesApplicationID() throws Exception {
-		ApplicationID appId = new ApplicationID();
-
-		CompletedCheckpoint checkpoint = mock(CompletedCheckpoint.class);
-		when(checkpoint.getStates()).thenReturn(Collections.<StateForTask>emptyList());
-		when(checkpoint.getCheckpointID()).thenReturn(12312312L);
-
-		Savepoint savepoint = new Savepoint(appId, checkpoint);
-
-		StateStore<Savepoint> savepointStore = mock(StateStore.class);
-		when(savepointStore.getState(anyString())).thenReturn(savepoint);
-
-		SavepointCoordinator coordinator = createSavepointCoordinator(
-				new ApplicationID(),
-				new JobID(),
-				60 * 1000,
-				new ExecutionVertex[] {},
-				new ExecutionVertex[] {},
-				new ExecutionVertex[] {},
-				new MockCheckpointIdCounter(),
-				savepointStore);
-
-		assertEquals(appId, coordinator.restoreSavepoint(createExecutionJobVertexMap(), "any"));
-
-		coordinator.shutdown();
-	}
-
-	@Test
 	public void testRollbackSetsCheckpointID() throws Exception {
-		ApplicationID appId = new ApplicationID();
-
-		CompletedCheckpoint checkpoint = mock(CompletedCheckpoint.class);
-		when(checkpoint.getStates()).thenReturn(Collections.<StateForTask>emptyList());
-		when(checkpoint.getCheckpointID()).thenReturn(12312312L);
-
-		Savepoint savepoint = new Savepoint(appId, checkpoint);
+		CompletedCheckpoint savepoint = mock(CompletedCheckpoint.class);
+		when(savepoint.getTaskStates()).thenReturn(Collections.<JobVertexID, TaskState>emptyMap());
+		when(savepoint.getCheckpointID()).thenReturn(12312312L);
 
 		CheckpointIDCounter checkpointIdCounter = mock(CheckpointIDCounter.class);
 
-		StateStore<Savepoint> savepointStore = mock(StateStore.class);
+		StateStore<CompletedCheckpoint> savepointStore = mock(StateStore.class);
 		when(savepointStore.getState(anyString())).thenReturn(savepoint);
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				new ApplicationID(),
 				new JobID(),
 				60 * 1000,
 				new ExecutionVertex[] {},
@@ -384,7 +345,7 @@ public class SavepointCoordinatorTest {
 				checkpointIdCounter,
 				savepointStore);
 
-		assertEquals(appId, coordinator.restoreSavepoint(createExecutionJobVertexMap(), "any"));
+		coordinator.restoreSavepoint(createExecutionJobVertexMap(), "any");
 
 		verify(checkpointIdCounter).setCount(eq(12312312L + 1));
 
@@ -397,7 +358,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointIfTriggerTasksNotExecuted() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionVertex[] triggerVertices = new ExecutionVertex[] {
 				mock(ExecutionVertex.class),
@@ -407,14 +367,13 @@ public class SavepointCoordinatorTest {
 				mockExecutionVertex(jobId) };
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				triggerVertices,
 				ackVertices,
 				new ExecutionVertex[] {},
 				new MockCheckpointIdCounter(),
-				new HeapStateStore<Savepoint>());
+				new HeapStateStore<CompletedCheckpoint>());
 
 		// Trigger savepoint
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(1238123);
@@ -437,7 +396,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointIfTriggerTasksAreFinished() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionVertex[] triggerVertices = new ExecutionVertex[] {
 				mockExecutionVertex(jobId),
@@ -447,14 +405,13 @@ public class SavepointCoordinatorTest {
 				mockExecutionVertex(jobId) };
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				triggerVertices,
 				ackVertices,
 				new ExecutionVertex[] {},
 				new MockCheckpointIdCounter(),
-				new HeapStateStore<Savepoint>());
+				new HeapStateStore<CompletedCheckpoint>());
 
 		// Trigger savepoint
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(1238123);
@@ -477,7 +434,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointIfAckTasksAreNotExecuted() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionVertex[] triggerVertices = new ExecutionVertex[] {
 				mockExecutionVertex(jobId),
@@ -487,14 +443,13 @@ public class SavepointCoordinatorTest {
 				mock(ExecutionVertex.class) };
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				triggerVertices,
 				ackVertices,
 				new ExecutionVertex[] {},
 				new MockCheckpointIdCounter(),
-				new HeapStateStore<Savepoint>());
+				new HeapStateStore<CompletedCheckpoint>());
 
 		// Trigger savepoint
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(1238123);
@@ -517,7 +472,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortOnCheckpointTimeout() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionVertex[] vertices = new ExecutionVertex[] {
 				mockExecutionVertex(jobId),
@@ -525,34 +479,29 @@ public class SavepointCoordinatorTest {
 		ExecutionVertex commitVertex = mockExecutionVertex(jobId);
 		MockCheckpointIdCounter checkpointIdCounter = new MockCheckpointIdCounter();
 
+		long checkpointTimeout = 1000;
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
-				20,
+				checkpointTimeout,
 				vertices,
 				vertices,
 				new ExecutionVertex[] { commitVertex },
 				checkpointIdCounter,
-				new HeapStateStore<Savepoint>());
+				new HeapStateStore<CompletedCheckpoint>());
 
 		// Trigger the savepoint
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(12731273);
 		assertFalse(savepointPathFuture.isCompleted());
 
 		long checkpointId = checkpointIdCounter.getLastReturnedCount();
-
-		// Acknowledge single task
-		coordinator.receiveAcknowledgeMessage(new AcknowledgeCheckpoint(
-				jobId, vertices[0].getCurrentExecutionAttempt().getAttemptId(),
-				checkpointId, createSerializedStateHandle(vertices[0]), 0));
-
 		PendingCheckpoint pendingCheckpoint = coordinator.getPendingCheckpoints()
 				.get(checkpointId);
 
-		assertFalse(pendingCheckpoint.isDiscarded());
+		assertNotNull("Checkpoint not pending (test race)", pendingCheckpoint);
+		assertFalse("Checkpoint already discarded (test race)", pendingCheckpoint.isDiscarded());
 
 		// Wait for savepoint to timeout
-		Deadline deadline = FiniteDuration.apply(5, "s").fromNow();
+		Deadline deadline = FiniteDuration.apply(60, "s").fromNow();
 		while (deadline.hasTimeLeft()
 				&& !pendingCheckpoint.isDiscarded()
 				&& coordinator.getNumberOfPendingCheckpoints() > 0) {
@@ -561,7 +510,7 @@ public class SavepointCoordinatorTest {
 		}
 
 		// Verify discarded
-		assertTrue(pendingCheckpoint.isDiscarded());
+		assertTrue("Savepoint not discarded within timeout", pendingCheckpoint.isDiscarded());
 		assertEquals(0, coordinator.getNumberOfPendingCheckpoints());
 		assertEquals(0, coordinator.getNumberOfRetainedSuccessfulCheckpoints());
 
@@ -586,21 +535,19 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointsOnShutdown() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionVertex[] vertices = new ExecutionVertex[] {
 				mockExecutionVertex(jobId),
 				mockExecutionVertex(jobId) };
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				vertices,
 				vertices,
 				vertices,
 				new MockCheckpointIdCounter(),
-				new HeapStateStore<Savepoint>());
+				new HeapStateStore<CompletedCheckpoint>());
 
 		// Trigger savepoints
 		List<Future<String>> savepointPathFutures = new ArrayList<>();
@@ -631,14 +578,12 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointOnStateStoreFailure() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		ExecutionJobVertex jobVertex = mockExecutionJobVertex(jobId, new JobVertexID(), 4);
-		HeapStateStore<Savepoint> savepointStore = spy(
-				new HeapStateStore<Savepoint>());
+		HeapStateStore<CompletedCheckpoint> savepointStore = spy(
+				new HeapStateStore<CompletedCheckpoint>());
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				60 * 1000,
 				jobVertex.getTaskVertices(),
@@ -649,7 +594,7 @@ public class SavepointCoordinatorTest {
 
 		// Failure on putState
 		doThrow(new Exception("TestException"))
-				.when(savepointStore).putState(any(Savepoint.class));
+				.when(savepointStore).putState(any(CompletedCheckpoint.class));
 
 		Future<String> savepointPathFuture = coordinator.triggerSavepoint(1231273123);
 
@@ -675,7 +620,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testAbortSavepointIfSubsumed() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		long checkpointTimeout = 60 * 1000;
 		long[] timestamps = new long[] { 1272635, 1272635 + 10 };
@@ -684,10 +628,9 @@ public class SavepointCoordinatorTest {
 				mockExecutionVertex(jobId),
 				mockExecutionVertex(jobId) };
 		MockCheckpointIdCounter checkpointIdCounter = new MockCheckpointIdCounter();
-		HeapStateStore<Savepoint> savepointStore = new HeapStateStore<>();
+		HeapStateStore<CompletedCheckpoint> savepointStore = new HeapStateStore<>();
 
 		SavepointCoordinator coordinator = createSavepointCoordinator(
-				appId,
 				jobId,
 				checkpointTimeout,
 				vertices,
@@ -747,7 +690,7 @@ public class SavepointCoordinatorTest {
 			verifyNotifyCheckpointComplete(vertex, checkpointIds[1], timestamps[1]);
 		}
 
-		Savepoint[] savepoints = new Savepoint[2];
+		CompletedCheckpoint[] savepoints = new CompletedCheckpoint[2];
 		String[] savepointPaths = new String[2];
 
 		// Verify that the futures have both been completed
@@ -764,7 +707,7 @@ public class SavepointCoordinatorTest {
 		assertTrue(savepointPathFutures.get(1).isCompleted());
 		savepointPaths[1] = Await.result(savepointPathFutures.get(1), FiniteDuration.Zero());
 		savepoints[1] = savepointStore.getState(savepointPaths[1]);
-		verifySavepoint(savepoints[1], appId, jobId, checkpointIds[1], timestamps[1],
+		verifySavepoint(savepoints[1], jobId, checkpointIds[1], timestamps[1],
 				vertices);
 
 		// Verify all promises removed
@@ -775,7 +718,6 @@ public class SavepointCoordinatorTest {
 
 	@Test
 	public void testShutdownDoesNotCleanUpCompletedCheckpointsWithFileSystemStore() throws Exception {
-		ApplicationID appId = new ApplicationID();
 		JobID jobId = new JobID();
 		long checkpointTimeout = 60 * 1000;
 		long timestamp = 1272635;
@@ -788,11 +730,10 @@ public class SavepointCoordinatorTest {
 		final File tmpDir = CommonTestUtils.createTempDirectory();
 
 		try {
-			FileSystemStateStore<Savepoint> savepointStore = new FileSystemStateStore<>(
+			FileSystemStateStore<CompletedCheckpoint> savepointStore = new FileSystemStateStore<>(
 					tmpDir.toURI().toString(), "sp-");
 
 			SavepointCoordinator coordinator = createSavepointCoordinator(
-					appId,
 					jobId,
 					checkpointTimeout,
 					vertices,
@@ -845,8 +786,8 @@ public class SavepointCoordinatorTest {
 			coordinator.shutdown();
 
 			// Verify the savepoint is still available
-			Savepoint savepoint = savepointStore.getState(savepointPath);
-			verifySavepoint(savepoint, appId, jobId, checkpointId, timestamp,
+			CompletedCheckpoint savepoint = savepointStore.getState(savepointPath);
+			verifySavepoint(savepoint, jobId, checkpointId, timestamp,
 					vertices);
 		}
 		finally {
@@ -859,22 +800,21 @@ public class SavepointCoordinatorTest {
 	// ------------------------------------------------------------------------
 
 	private static SavepointCoordinator createSavepointCoordinator(
-			ApplicationID appId,
 			JobID jobId,
 			long checkpointTimeout,
 			ExecutionVertex[] triggerVertices,
 			ExecutionVertex[] ackVertices,
 			ExecutionVertex[] commitVertices,
 			CheckpointIDCounter checkpointIdCounter,
-			StateStore<Savepoint> savepointStore) throws Exception {
+			StateStore<CompletedCheckpoint> savepointStore) throws Exception {
 
 		ClassLoader classLoader = Thread.currentThread().getContextClassLoader();
 
 		return new SavepointCoordinator(
-				appId,
 				jobId,
 				checkpointTimeout,
 				checkpointTimeout,
+				42,
 				triggerVertices,
 				ackVertices,
 				commitVertices,
@@ -968,23 +908,27 @@ public class SavepointCoordinatorTest {
 		assertEquals(expectedTimestamp, checkpoint.getCheckpointTimestamp());
 		assertEquals(expectedNumberOfAcknowledgedTasks, checkpoint.getNumberOfAcknowledgedTasks());
 		assertEquals(expectedNumberOfNonAcknowledgedTasks, checkpoint.getNumberOfNonAcknowledgedTasks());
-		assertEquals(expectedNumberOfCollectedStates, checkpoint.getCollectedStates().size());
+
+		int actualNumberOfCollectedStates = 0;
+
+		for (TaskState taskState : checkpoint.getTaskStates().values()) {
+			actualNumberOfCollectedStates += taskState.getNumberCollectedStates();
+		}
+
+		assertEquals(expectedNumberOfCollectedStates, actualNumberOfCollectedStates);
 		assertEquals(expectedIsDiscarded, checkpoint.isDiscarded());
 		assertEquals(expectedIsFullyAcknowledged, checkpoint.isFullyAcknowledged());
 	}
 
 	private static void verifySavepoint(
-			Savepoint savepoint,
-			ApplicationID expectedAppId,
+			CompletedCheckpoint savepoint,
 			JobID expectedJobId,
 			long expectedCheckpointId,
 			long expectedTimestamp,
 			ExecutionVertex[] expectedVertices) throws Exception {
 
-		assertEquals(expectedAppId, savepoint.getApplicationId());
-
 		verifyCompletedCheckpoint(
-				savepoint.getCompletedCheckpoint(),
+				savepoint,
 				expectedJobId,
 				expectedCheckpointId,
 				expectedTimestamp,
@@ -1004,27 +948,24 @@ public class SavepointCoordinatorTest {
 		assertEquals(expectedCheckpointId, checkpoint.getCheckpointID());
 		assertEquals(expectedTimestamp, checkpoint.getTimestamp());
 
-		List<StateForTask> states = checkpoint.getStates();
-		assertEquals(expectedVertices.length, states.size());
-
 		for (ExecutionVertex vertex : expectedVertices) {
-			JobVertexID expectedOperatorId = vertex.getJobvertexId();
+			JobVertexID jobVertexID = vertex.getJobvertexId();
 
-			boolean success = false;
-			for (StateForTask state : states) {
-				if (state.getOperatorId().equals(expectedOperatorId)) {
-					ExecutionAttemptID vertexAttemptId = vertex.getCurrentExecutionAttempt().getAttemptId();
-					ExecutionAttemptID stateAttemptId = (ExecutionAttemptID) state.getState()
-							.deserializeValue(Thread.currentThread().getContextClassLoader())
-							.getState(Thread.currentThread().getContextClassLoader());
+			TaskState taskState = checkpoint.getTaskState(jobVertexID);
 
-					assertEquals(vertexAttemptId, stateAttemptId);
-					success = true;
-					break;
-				}
-			}
+			assertNotNull(taskState);
 
-			assertTrue(success);
+			SubtaskState subtaskState = taskState.getState(vertex.getParallelSubtaskIndex());
+
+			assertNotNull(subtaskState);
+
+			ExecutionAttemptID vertexAttemptId = vertex.getCurrentExecutionAttempt().getAttemptId();
+
+			ExecutionAttemptID stateAttemptId = (ExecutionAttemptID) subtaskState.getState()
+				.deserializeValue(Thread.currentThread().getContextClassLoader())
+				.getState(Thread.currentThread().getContextClassLoader());
+
+			assertEquals(vertexAttemptId, stateAttemptId);
 		}
 	}
 
@@ -1043,7 +984,7 @@ public class SavepointCoordinatorTest {
 		ExecutionVertex[] vertices = new ExecutionVertex[parallelism];
 
 		for (int i = 0; i < vertices.length; i++) {
-			vertices[i] = mockExecutionVertex(jobId, jobVertexId, i, ExecutionState.RUNNING);
+			vertices[i] = mockExecutionVertex(jobId, jobVertexId, i, parallelism, ExecutionState.RUNNING);
 		}
 
 		when(jobVertex.getTaskVertices()).thenReturn(vertices);
@@ -1059,13 +1000,14 @@ public class SavepointCoordinatorTest {
 			JobID jobId,
 			ExecutionState state) {
 
-		return mockExecutionVertex(jobId, new JobVertexID(), 0, state);
+		return mockExecutionVertex(jobId, new JobVertexID(), 0, 1, state);
 	}
 
 	private static ExecutionVertex mockExecutionVertex(
 			JobID jobId,
 			JobVertexID jobVertexId,
 			int subtaskIndex,
+			int parallelism,
 			ExecutionState executionState) {
 
 		Execution exec = mock(Execution.class);
@@ -1077,21 +1019,25 @@ public class SavepointCoordinatorTest {
 		when(vertex.getJobvertexId()).thenReturn(jobVertexId);
 		when(vertex.getParallelSubtaskIndex()).thenReturn(subtaskIndex);
 		when(vertex.getCurrentExecutionAttempt()).thenReturn(exec);
+		when(vertex.getTotalNumberOfParallelSubtasks()).thenReturn(parallelism);
 
 		return vertex;
 	}
 
 	private static class MockCheckpointIdCounter implements CheckpointIDCounter {
 
+		private boolean started;
 		private long count;
 		private long lastReturnedCount;
 
 		@Override
 		public void start() throws Exception {
+			started = true;
 		}
 
 		@Override
 		public void stop() throws Exception {
+			started = false;
 		}
 
 		@Override
@@ -1107,6 +1053,10 @@ public class SavepointCoordinatorTest {
 
 		long getLastReturnedCount() {
 			return lastReturnedCount;
+		}
+
+		public boolean isStarted() {
+			return started;
 		}
 	}
 }

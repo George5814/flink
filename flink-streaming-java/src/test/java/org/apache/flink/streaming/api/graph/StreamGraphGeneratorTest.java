@@ -1,4 +1,4 @@
-/**
+/*
  * Licensed to the Apache Software Foundation (ASF) under one
  * or more contributor license agreements.  See the NOTICE file
  * distributed with this work for additional information
@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *    http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.flink.streaming.api.graph;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -39,7 +40,7 @@ import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.util.EvenOddOutputSelector;
 import org.apache.flink.streaming.util.NoOpIntMap;
 import org.apache.flink.streaming.util.NoOpSink;
-import org.apache.flink.streaming.util.StreamingMultipleProgramsTestBase;
+
 import org.junit.Test;
 
 import static org.junit.Assert.assertEquals;
@@ -109,7 +110,7 @@ public class StreamGraphGeneratorTest {
 				.shuffle();
 
 
-		SingleOutputStreamOperator<Integer, ?> unionedMap = map1.union(map2).union(map3)
+		SingleOutputStreamOperator<Integer> unionedMap = map1.union(map2).union(map3)
 				.map(new NoOpIntMap());
 
 		unionedMap.addSink(new NoOpSink<Integer>());
@@ -162,7 +163,7 @@ public class StreamGraphGeneratorTest {
 
 		EvenOddOutputSelector selector = new EvenOddOutputSelector();
 
-		SingleOutputStreamOperator<Integer, ?> unionedMap = map1.union(map2).union(map3)
+		SingleOutputStreamOperator<Integer> unionedMap = map1.union(map2).union(map3)
 				.broadcast()
 				.split(selector)
 				.select("foo")
@@ -239,6 +240,7 @@ public class StreamGraphGeneratorTest {
 	private static class OutputTypeConfigurableOperationWithTwoInputs
 			extends AbstractStreamOperator<Integer>
 			implements TwoInputStreamOperator<Integer, Integer, Integer>, OutputTypeConfigurable<Integer> {
+		private static final long serialVersionUID = 1L;
 
 		TypeInformation<Integer> tpeInformation;
 
@@ -252,12 +254,12 @@ public class StreamGraphGeneratorTest {
 		}
 
 		@Override
-		public void processElement1(StreamRecord element) throws Exception {
+		public void processElement1(StreamRecord<Integer> element) throws Exception {
 			output.collect(element);
 		}
 
 		@Override
-		public void processElement2(StreamRecord element) throws Exception {
+		public void processElement2(StreamRecord<Integer> element) throws Exception {
 			output.collect(element);
 		}
 
@@ -274,6 +276,7 @@ public class StreamGraphGeneratorTest {
 	private static class OutputTypeConfigurableOperationWithOneInput
 			extends AbstractStreamOperator<Integer>
 			implements OneInputStreamOperator<Integer, Integer>, OutputTypeConfigurable<Integer> {
+		private static final long serialVersionUID = 1L;
 
 		TypeInformation<Integer> tpeInformation;
 

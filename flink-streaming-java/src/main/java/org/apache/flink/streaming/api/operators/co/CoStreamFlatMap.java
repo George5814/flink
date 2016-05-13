@@ -17,6 +17,7 @@
 
 package org.apache.flink.streaming.api.operators.co;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.streaming.api.functions.co.CoFlatMapFunction;
 import org.apache.flink.streaming.api.operators.AbstractUdfStreamOperator;
 import org.apache.flink.streaming.api.operators.TwoInputStreamOperator;
@@ -24,6 +25,7 @@ import org.apache.flink.streaming.api.operators.TimestampedCollector;
 import org.apache.flink.streaming.api.watermark.Watermark;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+@Internal
 public class CoStreamFlatMap<IN1, IN2, OUT>
 		extends AbstractUdfStreamOperator<OUT, CoFlatMapFunction<IN1, IN2, OUT>>
 		implements TwoInputStreamOperator<IN1, IN2, OUT> {
@@ -50,14 +52,14 @@ public class CoStreamFlatMap<IN1, IN2, OUT>
 
 	@Override
 	public void processElement1(StreamRecord<IN1> element) throws Exception {
-		collector.setTimestamp(element.getTimestamp());
+		collector.setTimestamp(element);
 		userFunction.flatMap1(element.getValue(), collector);
 
 	}
 
 	@Override
 	public void processElement2(StreamRecord<IN2> element) throws Exception {
-		collector.setTimestamp(element.getTimestamp());
+		collector.setTimestamp(element);
 		userFunction.flatMap2(element.getValue(), collector);
 	}
 

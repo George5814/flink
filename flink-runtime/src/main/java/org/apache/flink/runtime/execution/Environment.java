@@ -18,8 +18,8 @@
 
 package org.apache.flink.runtime.execution;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.TaskInfo;
-import org.apache.flink.api.common.ApplicationID;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
@@ -47,14 +47,11 @@ import java.util.concurrent.Future;
 public interface Environment {
 
 	/**
-	 * Returns the ID of the application the task belongs to.
+	 * Returns the job specific {@link ExecutionConfig}.
 	 *
-	 * <p>This ID stays the same across job submissions after resuming an application from a
-	 * savepoint.
-	 *
-	 * @return The ID of the application the task belongs to
-	 */
-	ApplicationID getApplicationID();
+	 * @return The execution configuration associated with the current job.
+	 * */
+	ExecutionConfig getExecutionConfig();
 
 	/**
 	 * Returns the ID of the job that the task belongs to.

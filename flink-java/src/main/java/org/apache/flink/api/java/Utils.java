@@ -20,6 +20,7 @@ package org.apache.flink.api.java;
 
 import org.apache.commons.lang3.StringUtils;
 
+import org.apache.flink.annotation.Internal;
 import org.apache.flink.api.common.accumulators.Accumulator;
 import org.apache.flink.api.common.accumulators.SerializedListAccumulator;
 import org.apache.flink.api.common.accumulators.SimpleAccumulator;
@@ -33,7 +34,6 @@ import org.apache.flink.configuration.Configuration;
 import java.io.IOException;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
-import java.util.List;
 import java.util.Random;
 
 import static org.apache.flink.api.java.functions.FunctionAnnotation.SkipCodeAnalysis;
@@ -41,6 +41,7 @@ import static org.apache.flink.api.java.functions.FunctionAnnotation.SkipCodeAna
 /**
  * Utility class that contains helper methods to work with Java APIs.
  */
+@Internal
 public final class Utils {
 	
 	public static final Random RNG = new Random();
@@ -59,24 +60,6 @@ public final class Utils {
 		StackTraceElement elem = stackTrace[depth];
 
 		return String.format("%s(%s:%d)", elem.getMethodName(), elem.getFileName(), elem.getLineNumber());
-	}
-
-	/**
-	 * Returns all GenericTypeInfos contained in a composite type.
-	 *
-	 * @param typeInfo {@link CompositeType}
-	 */
-	public static void getContainedGenericTypes(CompositeType<?> typeInfo, List<GenericTypeInfo<?>> target) {
-		for (int i = 0; i < typeInfo.getArity(); i++) {
-			TypeInformation<?> type = typeInfo.getTypeAt(i);
-			if (type instanceof CompositeType) {
-				getContainedGenericTypes((CompositeType<?>) type, target);
-			} else if (type instanceof GenericTypeInfo) {
-				if (!target.contains(type)) {
-					target.add((GenericTypeInfo<?>) type);
-				}
-			}
-		}
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -210,8 +193,23 @@ public final class Utils {
 		}
 
 		@Override
+		public boolean equals(Object obj) {
+			if (obj instanceof ChecksumHashCode) {
+				ChecksumHashCode other = (ChecksumHashCode) obj;
+				return this.count == other.count && this.checksum == other.checksum;
+			} else {
+				return false;
+			}
+		}
+
+		@Override
+		public int hashCode() {
+			return (int) (this.count + this.hashCode());
+		}
+
+		@Override
 		public String toString() {
-			return "ChecksumHashCode " + this.checksum + ", count " + this.count;
+			return String.format("ChecksumHashCode 0x%016x, count %d", this.checksum, this.count);
 		}
 	}
 

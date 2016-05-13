@@ -23,6 +23,7 @@ import akka.testkit.JavaTestKit;
 
 import com.typesafe.config.Config;
 
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.akka.AkkaUtils;
@@ -41,6 +42,9 @@ import org.apache.flink.runtime.jobgraph.IntermediateDataSetID;
 import org.apache.flink.runtime.jobgraph.JobGraph;
 import org.apache.flink.runtime.messages.JobManagerMessages;
 import org.apache.flink.runtime.messages.JobManagerMessages.LeaderSessionMessage;
+import org.apache.flink.runtime.messages.JobManagerMessages.StopJob;
+import org.apache.flink.runtime.messages.JobManagerMessages.StoppingFailure;
+import org.apache.flink.runtime.messages.JobManagerMessages.StoppingSuccess;
 import org.apache.flink.runtime.messages.JobManagerMessages.SubmitJob;
 import org.apache.flink.runtime.messages.JobManagerMessages.RequestPartitionState;
 import org.apache.flink.runtime.messages.TaskMessages.PartitionState;
@@ -48,9 +52,10 @@ import org.apache.flink.runtime.testingUtils.TestingCluster;
 import org.apache.flink.runtime.testingUtils.TestingJobManagerMessages;
 import org.apache.flink.runtime.testingUtils.TestingJobManagerMessages.ExecutionGraphFound;
 import org.apache.flink.runtime.testingUtils.TestingJobManagerMessages.RequestExecutionGraph;
+import org.apache.flink.runtime.testingUtils.TestingJobManagerMessages.WaitForAllVerticesToBeRunning;
 import org.apache.flink.runtime.testingUtils.TestingJobManagerMessages.WaitForAllVerticesToBeRunningOrFinished;
-
 import org.apache.flink.runtime.testingUtils.TestingUtils;
+import org.apache.flink.runtime.testutils.StoppableInvokable;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
 import org.junit.Test;
@@ -104,127 +109,237 @@ public class JobManagerTest {
 	@Test
 	public void testRequestPartitionState() throws Exception {
 		new JavaTestKit(system) {{
-			// Setup
-			TestingCluster cluster = null;
+			new Within(duration("15 seconds")) {
+				@Override
+				protected void run() {
+					// Setup
+					TestingCluster cluster = null;
 
-			try {
-				cluster = startTestingCluster(2, 1, DEFAULT_AKKA_ASK_TIMEOUT());
+					try {
+						cluster = startTestingCluster(2, 1, DEFAULT_AKKA_ASK_TIMEOUT());
 
-				final IntermediateDataSetID rid = new IntermediateDataSetID();
+						final IntermediateDataSetID rid = new IntermediateDataSetID();
 
-				// Create a task
-				final JobVertex sender = new JobVertex("Sender");
-				sender.setParallelism(1);
-				sender.setInvokableClass(Tasks.BlockingNoOpInvokable.class); // just block
-				sender.createAndAddResultDataSet(rid, PIPELINED);
+						// Create a task
+						final JobVertex sender = new JobVertex("Sender");
+						sender.setParallelism(1);
+						sender.setInvokableClass(Tasks.BlockingNoOpInvokable.class); // just block
+						sender.createAndAddResultDataSet(rid, PIPELINED);
 
-				final JobGraph jobGraph = new JobGraph("Blocking test job", sender);
-				final JobID jid = jobGraph.getJobID();
+						final JobGraph jobGraph = new JobGraph("Blocking test job", new ExecutionConfig(), sender);
+						final JobID jid = jobGraph.getJobID();
 
-				final ActorGateway jobManagerGateway = cluster.getLeaderGateway(
-						TestingUtils.TESTING_DURATION());
+						final ActorGateway jobManagerGateway = cluster.getLeaderGateway(
+							TestingUtils.TESTING_DURATION());
 
-				// we can set the leader session ID to None because we don't use this gateway to send messages
-				final ActorGateway testActorGateway = new AkkaActorGateway(getTestActor(), null);
+						// we can set the leader session ID to None because we don't use this gateway to send messages
+						final ActorGateway testActorGateway = new AkkaActorGateway(getTestActor(), null);
 
-				// Submit the job and wait for all vertices to be running
-				jobManagerGateway.tell(
-						new SubmitJob(
+						// Submit the job and wait for all vertices to be running
+						jobManagerGateway.tell(
+							new SubmitJob(
 								jobGraph,
 								ListeningBehaviour.EXECUTION_RESULT),
-						testActorGateway);
-				expectMsgClass(JobManagerMessages.JobSubmitSuccess.class);
+							testActorGateway);
+						expectMsgClass(JobManagerMessages.JobSubmitSuccess.class);
 
-				jobManagerGateway.tell(
-						new WaitForAllVerticesToBeRunningOrFinished(jobGraph.getJobID()),
-						testActorGateway);
+						jobManagerGateway.tell(
+							new WaitForAllVerticesToBeRunningOrFinished(jid),
+							testActorGateway);
 
-				expectMsgClass(TestingJobManagerMessages.AllVerticesRunning.class);
+						expectMsgClass(TestingJobManagerMessages.AllVerticesRunning.class);
 
-				// This is the mock execution ID of the task requesting the state of the partition
-				final ExecutionAttemptID receiver = new ExecutionAttemptID();
+						// This is the mock execution ID of the task requesting the state of the partition
+						final ExecutionAttemptID receiver = new ExecutionAttemptID();
 
-				// Request the execution graph to get the runtime info
-				jobManagerGateway.tell(new RequestExecutionGraph(jid), testActorGateway);
+						// Request the execution graph to get the runtime info
+						jobManagerGateway.tell(new RequestExecutionGraph(jid), testActorGateway);
 
-				final ExecutionGraph eg = expectMsgClass(ExecutionGraphFound.class)
-						.executionGraph();
+						final ExecutionGraph eg = expectMsgClass(ExecutionGraphFound.class)
+							.executionGraph();
 
-				final ExecutionVertex vertex = eg.getJobVertex(sender.getID())
-						.getTaskVertices()[0];
+						final ExecutionVertex vertex = eg.getJobVertex(sender.getID())
+							.getTaskVertices()[0];
 
-				final IntermediateResultPartition partition = vertex.getProducedPartitions()
-						.values().iterator().next();
+						final IntermediateResultPartition partition = vertex.getProducedPartitions()
+							.values().iterator().next();
 
-				final ResultPartitionID partitionId = new ResultPartitionID(
-						partition.getPartitionId(),
-						vertex.getCurrentExecutionAttempt().getAttemptId());
+						final ResultPartitionID partitionId = new ResultPartitionID(
+							partition.getPartitionId(),
+							vertex.getCurrentExecutionAttempt().getAttemptId());
 
-				// - The test ----------------------------------------------------------------------
+						// - The test ----------------------------------------------------------------------
 
-				// 1. All execution states
-				RequestPartitionState request = new RequestPartitionState(
-						jid, partitionId, receiver, rid);
+						// 1. All execution states
+						RequestPartitionState request = new RequestPartitionState(
+							jid, partitionId, receiver, rid);
 
-				for (ExecutionState state : ExecutionState.values()) {
-					ExecutionGraphTestUtils.setVertexState(vertex, state);
+						for (ExecutionState state : ExecutionState.values()) {
+							ExecutionGraphTestUtils.setVertexState(vertex, state);
 
-					jobManagerGateway.tell(request, testActorGateway);
+							jobManagerGateway.tell(request, testActorGateway);
 
-					LeaderSessionMessage lsm = expectMsgClass(LeaderSessionMessage.class);
+							LeaderSessionMessage lsm = expectMsgClass(LeaderSessionMessage.class);
 
-					assertEquals(PartitionState.class, lsm.message().getClass());
+							assertEquals(PartitionState.class, lsm.message().getClass());
 
-					PartitionState resp = (PartitionState) lsm.message();
+							PartitionState resp = (PartitionState) lsm.message();
 
-					assertEquals(request.taskExecutionId(), resp.taskExecutionId());
-					assertEquals(request.taskResultId(), resp.taskResultId());
-					assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
-					assertEquals(state, resp.state());
+							assertEquals(request.taskExecutionId(), resp.taskExecutionId());
+							assertEquals(request.taskResultId(), resp.taskResultId());
+							assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
+							assertEquals(state, resp.state());
+						}
+
+						// 2. Non-existing execution
+						request = new RequestPartitionState(jid, new ResultPartitionID(), receiver, rid);
+
+						jobManagerGateway.tell(request, testActorGateway);
+
+						LeaderSessionMessage lsm = expectMsgClass(LeaderSessionMessage.class);
+
+						assertEquals(PartitionState.class, lsm.message().getClass());
+
+						PartitionState resp = (PartitionState) lsm.message();
+
+						assertEquals(request.taskExecutionId(), resp.taskExecutionId());
+						assertEquals(request.taskResultId(), resp.taskResultId());
+						assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
+						assertNull(resp.state());
+
+						// 3. Non-existing job
+						request = new RequestPartitionState(
+							new JobID(), new ResultPartitionID(), receiver, rid);
+
+						jobManagerGateway.tell(request, testActorGateway);
+
+						lsm = expectMsgClass(LeaderSessionMessage.class);
+
+						assertEquals(PartitionState.class, lsm.message().getClass());
+
+						resp = (PartitionState) lsm.message();
+
+						assertEquals(request.taskExecutionId(), resp.taskExecutionId());
+						assertEquals(request.taskResultId(), resp.taskResultId());
+						assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
+						assertNull(resp.state());
+					} catch (Exception e) {
+						e.printStackTrace();
+						fail(e.getMessage());
+					} finally {
+						if (cluster != null) {
+							cluster.shutdown();
+						}
+					}
 				}
-
-				// 2. Non-existing execution
-				request = new RequestPartitionState(jid, new ResultPartitionID(), receiver, rid);
-
-				jobManagerGateway.tell(request, testActorGateway);
-
-				LeaderSessionMessage lsm = expectMsgClass(LeaderSessionMessage.class);
-
-				assertEquals(PartitionState.class, lsm.message().getClass());
-
-				PartitionState resp = (PartitionState) lsm.message();
-
-				assertEquals(request.taskExecutionId(), resp.taskExecutionId());
-				assertEquals(request.taskResultId(), resp.taskResultId());
-				assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
-				assertNull(resp.state());
-
-				// 3. Non-existing job
-				request = new RequestPartitionState(
-						new JobID(), new ResultPartitionID(), receiver, rid);
-
-				jobManagerGateway.tell(request, testActorGateway);
-
-				lsm = expectMsgClass(LeaderSessionMessage.class);
-
-				assertEquals(PartitionState.class, lsm.message().getClass());
-
-				resp = (PartitionState) lsm.message();
-
-				assertEquals(request.taskExecutionId(), resp.taskExecutionId());
-				assertEquals(request.taskResultId(), resp.taskResultId());
-				assertEquals(request.partitionId().getPartitionId(), resp.partitionId());
-				assertNull(resp.state());
-			}
-			catch (Exception e) {
-				e.printStackTrace();
-				fail(e.getMessage());
-			}
-			finally {
-				if (cluster != null) {
-					cluster.shutdown();
-				}
-			}
+			};
 		}};
 	}
+
+	@Test
+	public void testStopSignal() throws Exception {
+		new JavaTestKit(system) {{
+			new Within(duration("15 seconds")) {
+				@Override
+				protected void run() {
+					// Setup
+					TestingCluster cluster = null;
+
+					try {
+						cluster = startTestingCluster(2, 1, DEFAULT_AKKA_ASK_TIMEOUT());
+
+						// Create a task
+						final JobVertex sender = new JobVertex("Sender");
+						sender.setParallelism(2);
+						sender.setInvokableClass(StoppableInvokable.class);
+
+						final JobGraph jobGraph = new JobGraph("Stoppable streaming test job", new ExecutionConfig(), sender);
+						final JobID jid = jobGraph.getJobID();
+
+						final ActorGateway jobManagerGateway = cluster.getLeaderGateway(TestingUtils.TESTING_DURATION());
+
+						// we can set the leader session ID to None because we don't use this gateway to send messages
+						final ActorGateway testActorGateway = new AkkaActorGateway(getTestActor(), null);
+
+						// Submit the job and wait for all vertices to be running
+						jobManagerGateway.tell(
+							new SubmitJob(
+								jobGraph,
+								ListeningBehaviour.EXECUTION_RESULT),
+							testActorGateway);
+						expectMsgClass(JobManagerMessages.JobSubmitSuccess.class);
+
+						jobManagerGateway.tell(new WaitForAllVerticesToBeRunning(jid), testActorGateway);
+						expectMsgClass(TestingJobManagerMessages.AllVerticesRunning.class);
+
+						jobManagerGateway.tell(new StopJob(jid), testActorGateway);
+
+						// - The test ----------------------------------------------------------------------
+						expectMsgClass(StoppingSuccess.class);
+
+						expectMsgClass(JobManagerMessages.JobResultSuccess.class);
+					} finally {
+						if (cluster != null) {
+							cluster.shutdown();
+						}
+					}
+				}
+			};
+		}};
+	}
+
+	@Test
+	public void testStopSignalFail() throws Exception {
+		new JavaTestKit(system) {{
+			new Within(duration("15 seconds")) {
+				@Override
+				protected void run() {
+					// Setup
+					TestingCluster cluster = null;
+
+					try {
+						cluster = startTestingCluster(2, 1, DEFAULT_AKKA_ASK_TIMEOUT());
+
+						// Create a task
+						final JobVertex sender = new JobVertex("Sender");
+						sender.setParallelism(1);
+						sender.setInvokableClass(Tasks.BlockingNoOpInvokable.class); // just block
+
+						final JobGraph jobGraph = new JobGraph("Non-Stoppable batching test job", new ExecutionConfig(), sender);
+						final JobID jid = jobGraph.getJobID();
+
+						final ActorGateway jobManagerGateway = cluster.getLeaderGateway(TestingUtils.TESTING_DURATION());
+
+						// we can set the leader session ID to None because we don't use this gateway to send messages
+						final ActorGateway testActorGateway = new AkkaActorGateway(getTestActor(), null);
+
+						// Submit the job and wait for all vertices to be running
+						jobManagerGateway.tell(
+							new SubmitJob(
+								jobGraph,
+								ListeningBehaviour.EXECUTION_RESULT),
+							testActorGateway);
+						expectMsgClass(JobManagerMessages.JobSubmitSuccess.class);
+
+						jobManagerGateway.tell(new WaitForAllVerticesToBeRunning(jid), testActorGateway);
+						expectMsgClass(TestingJobManagerMessages.AllVerticesRunning.class);
+
+						jobManagerGateway.tell(new StopJob(jid), testActorGateway);
+
+						// - The test ----------------------------------------------------------------------
+						expectMsgClass(StoppingFailure.class);
+
+						jobManagerGateway.tell(new RequestExecutionGraph(jid), testActorGateway);
+
+						expectMsgClass(ExecutionGraphFound.class);
+					} finally {
+						if (cluster != null) {
+							cluster.shutdown();
+						}
+					}
+				}
+			};
+		}};
+	}
+
 }

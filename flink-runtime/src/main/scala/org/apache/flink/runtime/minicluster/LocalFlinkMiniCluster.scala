@@ -19,14 +19,22 @@
 package org.apache.flink.runtime.minicluster
 
 import akka.actor.{ActorRef, ActorSystem}
+import org.apache.flink.api.common.JobID
 
 import org.apache.flink.api.common.io.FileOutputFormat
 import org.apache.flink.configuration.{ConfigConstants, Configuration}
 import org.apache.flink.runtime.akka.AkkaUtils
+import org.apache.flink.runtime.clusterframework.FlinkResourceManager
+import org.apache.flink.runtime.clusterframework.standalone.StandaloneResourceManager
+import org.apache.flink.runtime.clusterframework.types.ResourceID
 import org.apache.flink.runtime.io.network.netty.NettyConfig
 import org.apache.flink.runtime.jobmanager.{MemoryArchivist, JobManager}
+import org.apache.flink.runtime.messages.JobManagerMessages
+import org.apache.flink.runtime.messages.JobManagerMessages.{StoppingFailure, StoppingResponse, RunningJobsStatus, RunningJobs}
 import org.apache.flink.runtime.taskmanager.TaskManager
 import org.apache.flink.runtime.util.EnvironmentInformation
+
+import scala.concurrent.Await
 
 /**
  * Local Flink mini cluster which executes all [[TaskManager]]s and the [[JobManager]] in the same
@@ -47,6 +55,8 @@ class LocalFlinkMiniCluster(
 
   override def generateConfiguration(userConfiguration: Configuration): Configuration = {
     val config = getDefaultConfig
+
+    setDefaultCiConfig(config)
 
     config.addAll(userConfiguration)
     setMemory(config)
@@ -80,6 +90,29 @@ class LocalFlinkMiniCluster(
     jobManager
   }
 
+  override def startResourceManager(index: Int, system: ActorSystem): ActorRef = {
+    val config = configuration.clone()
+
+    val resourceManagerName = getResourceManagerName(index)
+
+    val resourceManagerPort = config.getInteger(
+      ConfigConstants.RESOURCE_MANAGER_IPC_PORT_KEY,
+      ConfigConstants.DEFAULT_RESOURCE_MANAGER_IPC_PORT)
+
+    if(resourceManagerPort > 0) {
+      config.setInteger(ConfigConstants.RESOURCE_MANAGER_IPC_PORT_KEY, resourceManagerPort + index)
+    }
+
+    val resourceManager = FlinkResourceManager.startResourceManagerActors(
+      config,
+      system,
+      createLeaderRetrievalService(),
+      classOf[StandaloneResourceManager],
+      resourceManagerName)
+
+    resourceManager
+  }
+
   override def startTaskManager(index: Int, system: ActorSystem): ActorRef = {
     val config = configuration.clone()
 
@@ -108,10 +141,11 @@ class LocalFlinkMiniCluster(
     
     TaskManager.startTaskManagerComponentsAndActor(
       config,
+      ResourceID.generate(), // generate random resource id
       system,
       hostname, // network interface to bind to
       Some(taskManagerActorName), // actor name
-      Some(createLeaderRetrievalService), // job manager leader retrieval service
+      Some(createLeaderRetrievalService()), // job manager leader retrieval service
       localExecution, // start network stack?
       classOf[TaskManager])
   }
@@ -202,11 +236,50 @@ class LocalFlinkMiniCluster(
       JobManager.JOB_MANAGER_NAME
     }
   }
+
+  protected def getResourceManagerName(index: Int): String = {
+    if(singleActorSystem) {
+      FlinkResourceManager.RESOURCE_MANAGER_NAME + "_" + (index + 1)
+    } else {
+      FlinkResourceManager.RESOURCE_MANAGER_NAME
+    }
+  }
+
   protected def getArchiveName(index: Int): String = {
     if(singleActorSystem) {
       JobManager.ARCHIVE_NAME + "_" + (index + 1)
     } else {
       JobManager.ARCHIVE_NAME
+    }
+  }
+  
+  // --------------------------------------------------------------------------
+  //  Actions on running jobs
+  // --------------------------------------------------------------------------
+  
+  def currentlyRunningJobs: Iterable[JobID] = {
+    val leader = getLeaderGateway(timeout)
+    val future = leader.ask(JobManagerMessages.RequestRunningJobsStatus, timeout)
+                       .mapTo[RunningJobsStatus]
+    Await.result(future, timeout).runningJobs.map(_.getJobId)
+  }
+
+  def getCurrentlyRunningJobsJava(): java.util.List[JobID] = {
+    val list = new java.util.ArrayList[JobID]()
+    currentlyRunningJobs.foreach(list.add)
+    list
+  }
+  
+  def stopJob(id: JobID) : Unit = {
+    val leader = getLeaderGateway(timeout)
+    val response = leader.ask(new JobManagerMessages.StopJob(id), timeout)
+                         .mapTo[StoppingResponse]
+    val rc = Await.result(response, timeout)
+
+    rc match {
+      case failure: StoppingFailure =>
+        throw new Exception(s"Stopping the job with ID $id failed.", failure.cause)
+      case _ =>
     }
   }
 }

@@ -41,7 +41,7 @@ import org.apache.flink.runtime.testutils.TestJvmProcess;
 import org.apache.flink.runtime.testutils.ZooKeeperTestUtils;
 import org.apache.flink.runtime.util.ZooKeeperUtils;
 import org.apache.flink.runtime.zookeeper.ZooKeeperTestEnvironment;
-import org.apache.flink.streaming.api.checkpoint.CheckpointNotifier;
+import org.apache.flink.runtime.state.CheckpointListener;
 import org.apache.flink.streaming.api.checkpoint.Checkpointed;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.functions.sink.RichSinkFunction;
@@ -320,6 +320,10 @@ public class ChaosMonkeyITCase extends TestLogger {
 			LOG.info("Recovery state clean");
 		}
 		catch (Throwable t) {
+			// Print early (in some situations the process logs get too big
+			// for Travis and the root problem is not shown)
+			t.printStackTrace();
+
 			System.out.println("#################################################");
 			System.out.println(" TASK MANAGERS");
 			System.out.println("#################################################");
@@ -378,7 +382,7 @@ public class ChaosMonkeyITCase extends TestLogger {
 	}
 
 	public static class CheckpointedSequenceSource extends RichParallelSourceFunction<Long>
-			implements Checkpointed<Long>, CheckpointNotifier {
+			implements Checkpointed<Long>, CheckpointListener {
 
 		private static final long serialVersionUID = 0L;
 
@@ -448,7 +452,7 @@ public class ChaosMonkeyITCase extends TestLogger {
 	}
 
 	public static class CountingSink extends RichSinkFunction<Long>
-			implements Checkpointed<CountingSink>, CheckpointNotifier {
+			implements Checkpointed<CountingSink>, CheckpointListener {
 
 		private static final Logger LOG = LoggerFactory.getLogger(CountingSink.class);
 
@@ -675,7 +679,7 @@ public class ChaosMonkeyITCase extends TestLogger {
 
 		for (int i = 0; i < jobManagerProcesses.size(); i++) {
 			JobManagerProcess jobManager = jobManagerProcesses.get(i);
-			if (jobManager.getJobManagerAkkaURL().equals(currentLeader)) {
+			if (jobManager.getJobManagerAkkaURL(timeout).equals(currentLeader)) {
 				leaderIndex = i;
 				break;
 			}
@@ -692,7 +696,7 @@ public class ChaosMonkeyITCase extends TestLogger {
 			throws Exception {
 
 		JobManagerProcess jobManager = new JobManagerProcess(jobManagerPid++, config);
-		jobManager.createAndStart();
+		jobManager.startProcess();
 		LOG.info("Created and started {}.", jobManager);
 
 		return jobManager;
@@ -702,7 +706,7 @@ public class ChaosMonkeyITCase extends TestLogger {
 			throws Exception {
 
 		TaskManagerProcess taskManager = new TaskManagerProcess(taskManagerPid++, config);
-		taskManager.createAndStart();
+		taskManager.startProcess();
 		LOG.info("Created and started {}.", taskManager);
 
 		return taskManager;

@@ -20,7 +20,6 @@ package org.apache.flink.runtime.checkpoint;
 
 import akka.actor.ActorSystem;
 import akka.actor.Props;
-import org.apache.flink.api.common.ApplicationID;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.runtime.checkpoint.stats.CheckpointStatsTracker;
 import org.apache.flink.runtime.execution.ExecutionState;
@@ -31,6 +30,8 @@ import org.apache.flink.runtime.instance.ActorGateway;
 import org.apache.flink.runtime.instance.AkkaActorGateway;
 import org.apache.flink.runtime.jobgraph.JobVertexID;
 import org.apache.flink.runtime.jobmanager.RecoveryMode;
+import org.apache.flink.runtime.state.StateHandle;
+import org.apache.flink.util.SerializedValue;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import scala.concurrent.Future;
@@ -39,6 +40,7 @@ import scala.concurrent.Promise;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 
@@ -67,29 +69,27 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 
 	private static final Logger LOG = LoggerFactory.getLogger(SavepointCoordinator.class);
 
-	/**
-	 * The application ID of the job this coordinator belongs to. This is updated on reset to an
-	 * old savepoint.
-	 */
-	private ApplicationID appId;
-
 	/** Store for savepoints. */
-	private StateStore<Savepoint> savepointStore;
+	private StateStore<CompletedCheckpoint> savepointStore;
 
 	/** Mapping from checkpoint ID to promises for savepoints. */
 	private final Map<Long, Promise<String>> savepointPromises;
 
+	// TODO(uce) Temporary work around to restore initial state on
+	// failure during recovery. Will be superseded by FLINK-3397.
+	private volatile String savepointRestorePath;
+
 	public SavepointCoordinator(
-			ApplicationID appId,
 			JobID jobId,
 			long baseInterval,
 			long checkpointTimeout,
+			int numberKeyGroups,
 			ExecutionVertex[] tasksToTrigger,
 			ExecutionVertex[] tasksToWaitFor,
 			ExecutionVertex[] tasksToCommitTo,
 			ClassLoader userClassLoader,
 			CheckpointIDCounter checkpointIDCounter,
-			StateStore<Savepoint> savepointStore,
+			StateStore<CompletedCheckpoint> savepointStore,
 			CheckpointStatsTracker statsTracker) throws Exception {
 
 		super(jobId,
@@ -97,6 +97,7 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 				checkpointTimeout,
 				0L,
 				Integer.MAX_VALUE,
+				numberKeyGroups,
 				tasksToTrigger,
 				tasksToWaitFor,
 				tasksToCommitTo,
@@ -106,9 +107,12 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 				RecoveryMode.STANDALONE,
 				statsTracker);
 
-		this.appId = checkNotNull(appId);
 		this.savepointStore = checkNotNull(savepointStore);
 		this.savepointPromises = new ConcurrentHashMap<>();
+	}
+
+	public String getSavepointRestorePath() {
+		return savepointRestorePath;
 	}
 
 	// ------------------------------------------------------------------------
@@ -169,12 +173,11 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 	 *
 	 * @param tasks         Tasks that will possibly be reset
 	 * @param savepointPath The path of the savepoint to rollback to
-	 * @return The application ID of the rolled back savepoint
 	 * @throws IllegalStateException If coordinator is shut down
 	 * @throws IllegalStateException If mismatch between program and savepoint state
 	 * @throws Exception             If savepoint store failure
 	 */
-	public ApplicationID restoreSavepoint(
+	public void restoreSavepoint(
 			Map<JobVertexID, ExecutionJobVertex> tasks,
 			String savepointPath) throws Exception {
 
@@ -189,54 +192,72 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 
 			LOG.info("Rolling back to savepoint '{}'.", savepointPath);
 
-			Savepoint savepoint = savepointStore.getState(savepointPath);
-
-			CompletedCheckpoint checkpoint = savepoint.getCompletedCheckpoint();
+			CompletedCheckpoint checkpoint = savepointStore.getState(savepointPath);
 
 			LOG.info("Savepoint: {}@{}", checkpoint.getCheckpointID(), checkpoint.getTimestamp());
 
 			// Set the initial state of all tasks
 			LOG.debug("Rolling back individual operators.");
-			for (StateForTask state : checkpoint.getStates()) {
-				LOG.debug("Rolling back subtask {} of operator {}.",
-						state.getSubtask(), state.getOperatorId());
 
-				ExecutionJobVertex vertex = tasks.get(state.getOperatorId());
+			for (Map.Entry<JobVertexID, TaskState> taskStateEntry: checkpoint.getTaskStates().entrySet()) {
+				TaskState taskState = taskStateEntry.getValue();
+				ExecutionJobVertex executionJobVertex = tasks.get(taskStateEntry.getKey());
 
-				if (vertex == null) {
+				if (executionJobVertex != null) {
+					if (executionJobVertex.getParallelism() != taskState.getParallelism()) {
+						String msg = String.format("Failed to rollback to savepoint %s. " +
+								"Parallelism mismatch between savepoint state and new program. " +
+								"Cannot map operator %s with parallelism %d to new program with " +
+								"parallelism %d. This indicates that the program has been changed " +
+								"in a non-compatible way after the savepoint.",
+							checkpoint,
+							taskStateEntry.getKey(),
+							taskState.getParallelism(),
+							executionJobVertex.getParallelism());
+
+						throw new IllegalStateException(msg);
+					}
+
+					List<Set<Integer>> keyGroupPartitions = createKeyGroupPartitions(
+						numberKeyGroups,
+						executionJobVertex.getParallelism());
+
+					for (int i = 0; i < executionJobVertex.getTaskVertices().length; i++) {
+						SubtaskState subtaskState = taskState.getState(i);
+						SerializedValue<StateHandle<?>> state = null;
+
+						if (subtaskState != null) {
+							state = subtaskState.getState();
+						}
+
+						Map<Integer, SerializedValue<StateHandle<?>>> kvStateForTaskMap = taskState
+							.getUnwrappedKvStates(keyGroupPartitions.get(i));
+
+						Execution currentExecutionAttempt = executionJobVertex
+							.getTaskVertices()[i]
+							.getCurrentExecutionAttempt();
+
+						currentExecutionAttempt.setInitialState(state, kvStateForTaskMap, recoveryTimestamp);
+					}
+				} else {
 					String msg = String.format("Failed to rollback to savepoint %s. " +
 							"Cannot map old state for task %s to the new program. " +
 							"This indicates that the program has been changed in a " +
-							"non-compatible way  after the savepoint.", savepoint,
-							state.getOperatorId());
+							"non-compatible way  after the savepoint.", checkpoint,
+						taskStateEntry.getKey());
 					throw new IllegalStateException(msg);
 				}
-
-				if (state.getSubtask() >= vertex.getParallelism()) {
-					String msg = String.format("Failed to rollback to savepoint %s. " +
-							"Parallelism mismatch between savepoint state and new program. " +
-							"Cannot map subtask %d of operator %s to new program with " +
-							"parallelism %d. This indicates that the program has been changed " +
-							"in a non-compatible way after the savepoint.", savepoint,
-							state.getSubtask(), state.getOperatorId(), vertex.getParallelism());
-					throw new IllegalStateException(msg);
-				}
-
-				Execution exec = vertex.getTaskVertices()[state.getSubtask()]
-						.getCurrentExecutionAttempt();
-
-				exec.setInitialState(state.getState(), recoveryTimestamp);
 			}
 
 			// Reset the checkpoint ID counter
 			long nextCheckpointId = checkpoint.getCheckpointID();
+			checkpointIdCounter.start();
 			checkpointIdCounter.setCount(nextCheckpointId + 1);
 			LOG.info("Reset the checkpoint ID to {}", nextCheckpointId);
 
-			this.appId = savepoint.getApplicationId();
-			LOG.info("Reset the application ID to {}", appId);
-
-			return appId;
+			if (savepointRestorePath == null) {
+				savepointRestorePath = savepointPath;
+			}
 		}
 	}
 
@@ -275,8 +296,7 @@ public class SavepointCoordinator extends CheckpointCoordinator {
 
 		try {
 			// Save the checkpoint
-			String savepointPath = savepointStore.putState(
-					new Savepoint(appId, checkpoint));
+			String savepointPath = savepointStore.putState(checkpoint);
 			promise.success(savepointPath);
 		}
 		catch (Exception e) {

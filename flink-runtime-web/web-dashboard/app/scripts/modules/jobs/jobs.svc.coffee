@@ -180,6 +180,20 @@ angular.module('flinkApp')
 
     deferred.promise
 
+  @getTaskManagers = (vertexid) ->
+    deferred = $q.defer()
+
+    deferreds.job.promise.then (data) =>
+      # vertex = @seekVertex(vertexid)
+
+      $http.get flinkConfig.jobServer + "jobs/" + currentJob.jid + "/vertices/" + vertexid + "/taskmanagers"
+      .success (data) ->
+        taskmanagers = data.taskmanagers
+
+        deferred.resolve(taskmanagers)
+
+    deferred.promise
+
   @getAccumulators = (vertexid) ->
     deferred = $q.defer()
 
@@ -232,6 +246,24 @@ angular.module('flinkApp')
 
     deferred.promise
 
+  # Operator-level back pressure stats
+  @getOperatorBackPressure = (vertexid) ->
+    deferred = $q.defer()
+
+    $http.get flinkConfig.jobServer + "jobs/" + currentJob.jid + "/vertices/" + vertexid + "/backpressure"
+    .success (data) =>
+      deferred.resolve(data)
+
+    deferred.promise
+
+  @translateBackPressureLabelState = (state) ->
+    switch state.toLowerCase()
+      when 'in-progress' then 'danger'
+      when 'ok' then 'success'
+      when 'low' then 'warning'
+      when 'high' then 'danger'
+      else 'default'
+
   @loadExceptions = ->
     deferred = $q.defer()
 
@@ -249,5 +281,10 @@ angular.module('flinkApp')
     # uses the non REST-compliant GET yarn-cancel handler which is available in addition to the
     # proper "DELETE jobs/<jobid>/"
     $http.get flinkConfig.jobServer + "jobs/" + jobid + "/yarn-cancel"
+
+  @stopJob = (jobid) ->
+    # uses the non REST-compliant GET yarn-cancel handler which is available in addition to the
+    # proper "DELETE jobs/<jobid>/"
+    $http.get "jobs/" + jobid + "/yarn-stop"
 
   @

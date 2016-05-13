@@ -46,14 +46,22 @@ import org.apache.flink.api.java.tuple.Tuple4;
 import org.apache.flink.api.java.typeutils.ResultTypeQueryable;
 import org.apache.flink.api.java.typeutils.TupleTypeInfo;
 import org.apache.flink.api.java.typeutils.TypeExtractor;
+import org.apache.flink.graph.asm.translate.TranslateEdgeValues;
+import org.apache.flink.graph.asm.translate.TranslateFunction;
+import org.apache.flink.graph.asm.translate.TranslateGraphIds;
+import org.apache.flink.graph.asm.translate.TranslateVertexValues;
 import org.apache.flink.graph.gsa.ApplyFunction;
 import org.apache.flink.graph.gsa.GSAConfiguration;
 import org.apache.flink.graph.gsa.GatherFunction;
 import org.apache.flink.graph.gsa.GatherSumApplyIteration;
 import org.apache.flink.graph.gsa.SumFunction;
+import org.apache.flink.graph.pregel.ComputeFunction;
+import org.apache.flink.graph.pregel.MessageCombiner;
+import org.apache.flink.graph.pregel.VertexCentricConfiguration;
+import org.apache.flink.graph.pregel.VertexCentricIteration;
 import org.apache.flink.graph.spargel.MessagingFunction;
-import org.apache.flink.graph.spargel.VertexCentricConfiguration;
-import org.apache.flink.graph.spargel.VertexCentricIteration;
+import org.apache.flink.graph.spargel.ScatterGatherConfiguration;
+import org.apache.flink.graph.spargel.ScatterGatherIteration;
 import org.apache.flink.graph.spargel.VertexUpdateFunction;
 import org.apache.flink.graph.utils.EdgeToTuple3Map;
 import org.apache.flink.graph.utils.Tuple2ToVertexMap;
@@ -540,6 +548,42 @@ public class Graph<K, VV, EV> {
 				Edge.class, keyType, keyType, valueType);
 
 		return mapEdges(mapper, returnType);
+	}
+
+	/**
+	 * Translate {@link Vertex} and {@link Edge} IDs using the given {@link MapFunction}.
+	 *
+	 * @param translator implements conversion from {@code K} to {@code NEW}
+	 * @param <NEW> new ID type
+	 * @return graph with translated vertex and edge IDs
+	 * @throws Exception
+	 */
+	public <NEW> Graph<NEW, VV, EV> translateGraphIds(TranslateFunction<K, NEW> translator) throws Exception {
+		return run(new TranslateGraphIds<K, NEW, VV, EV>(translator));
+	}
+
+	/**
+	 * Translate {@link Vertex} values using the given {@link MapFunction}.
+	 *
+	 * @param translator implements conversion from {@code VV} to {@code NEW}
+	 * @param <NEW> new vertex value type
+	 * @return graph with translated vertex values
+	 * @throws Exception
+	 */
+	public <NEW> Graph<K, NEW, EV> translateVertexValues(TranslateFunction<VV, NEW> translator) throws Exception {
+		return run(new TranslateVertexValues<K, VV, NEW, EV>(translator));
+	}
+
+	/**
+	 * Translate {@link Edge} values using the given {@link MapFunction}.
+	 *
+	 * @param translator implements conversion from {@code EV} to {@code NEW}
+	 * @param <NEW> new edge value type
+	 * @return graph with translated edge values
+	 * @throws Exception
+	 */
+	public <NEW> Graph<K, VV, NEW> translateEdgeValues(TranslateFunction<EV, NEW> translator) throws Exception {
+		return run(new TranslateEdgeValues<K, VV, EV, NEW>(translator));
 	}
 
 	/**
@@ -1268,9 +1312,28 @@ public class Graph<K, VV, EV> {
 	 */
 	public Graph<K, VV, EV> addVertices(List<Vertex<K, VV>> verticesToAdd) {
 		// Add the vertices
-		DataSet<Vertex<K, VV>> newVertices = this.vertices.union(this.context.fromCollection(verticesToAdd)).distinct();
+		DataSet<Vertex<K, VV>> newVertices = this.vertices.coGroup(this.context.fromCollection(verticesToAdd))
+				.where(0).equalTo(0).with(new VerticesUnionCoGroup<K, VV>());
 
-		return new Graph<K, VV, EV>(newVertices, this.edges, this.context);
+		return new Graph<>(newVertices, this.edges, this.context);
+	}
+
+	private static final class VerticesUnionCoGroup<K, VV> implements CoGroupFunction<Vertex<K, VV>, Vertex<K, VV>, Vertex<K, VV>> {
+
+		@Override
+		public void coGroup(Iterable<Vertex<K, VV>> oldVertices, Iterable<Vertex<K, VV>> newVertices,
+							Collector<Vertex<K, VV>> out) throws Exception {
+
+			final Iterator<Vertex<K, VV>> oldVerticesIterator = oldVertices.iterator();
+			final Iterator<Vertex<K, VV>> newVerticesIterator = newVertices.iterator();
+
+			// if there is both an old vertex and a new vertex then only the old vertex is emitted
+			if (oldVerticesIterator.hasNext()) {
+				out.collect(oldVerticesIterator.next());
+			} else {
+				out.collect(newVerticesIterator.next());
+			}
+		}
 	}
 
 	/**
@@ -1417,8 +1480,8 @@ public class Graph<K, VV, EV> {
 	 *         the removed edges
 	 */
 	public Graph<K, VV, EV> removeEdge(Edge<K, EV> edge) {
-		DataSet<Edge<K, EV>> newEdges = getEdges().filter(new EdgeRemovalEdgeFilter<K, EV>(edge));
-		return new Graph<K, VV, EV>(this.vertices, newEdges, this.context);
+		DataSet<Edge<K, EV>> newEdges = getEdges().filter(new EdgeRemovalEdgeFilter<>(edge));
+		return new Graph<>(this.vertices, newEdges, this.context);
 	}
 
 	private static final class EdgeRemovalEdgeFilter<K, EV>
@@ -1455,14 +1518,8 @@ public class Graph<K, VV, EV> {
 		@Override
 		public void coGroup(Iterable<Edge<K, EV>> edge, Iterable<Edge<K, EV>> edgeToBeRemoved,
 							Collector<Edge<K, EV>> out) throws Exception {
-
-			final Iterator<Edge<K, EV>> edgeIterator = edge.iterator();
-			final Iterator<Edge<K, EV>> edgeToBeRemovedIterator = edgeToBeRemoved.iterator();
-			Edge<K, EV> next;
-
-			if (edgeIterator.hasNext()) {
-				if (!edgeToBeRemovedIterator.hasNext()) {
-					next = edgeIterator.next();
+			if (!edgeToBeRemoved.iterator().hasNext()) {
+				for (Edge<K, EV> next : edge) {
 					out.collect(next);
 				}
 			}
@@ -1585,42 +1642,42 @@ public class Graph<K, VV, EV> {
 	}
 
 	/**
-	 * Runs a Vertex-Centric iteration on the graph.
+	 * Runs a ScatterGather iteration on the graph.
 	 * No configuration options are provided.
 	 *
 	 * @param vertexUpdateFunction the vertex update function
 	 * @param messagingFunction the messaging function
 	 * @param maximumNumberOfIterations maximum number of iterations to perform
 	 * 
-	 * @return the updated Graph after the vertex-centric iteration has converged or
+	 * @return the updated Graph after the scatter-gather iteration has converged or
 	 * after maximumNumberOfIterations.
 	 */
-	public <M> Graph<K, VV, EV> runVertexCentricIteration(
+	public <M> Graph<K, VV, EV> runScatterGatherIteration(
 			VertexUpdateFunction<K, VV, M> vertexUpdateFunction,
 			MessagingFunction<K, VV, M, EV> messagingFunction,
 			int maximumNumberOfIterations) {
 
-		return this.runVertexCentricIteration(vertexUpdateFunction, messagingFunction,
+		return this.runScatterGatherIteration(vertexUpdateFunction, messagingFunction,
 				maximumNumberOfIterations, null);
 	}
 
 	/**
-	 * Runs a Vertex-Centric iteration on the graph with configuration options.
+	 * Runs a ScatterGather iteration on the graph with configuration options.
 	 * 
 	 * @param vertexUpdateFunction the vertex update function
 	 * @param messagingFunction the messaging function
 	 * @param maximumNumberOfIterations maximum number of iterations to perform
 	 * @param parameters the iteration configuration parameters
 	 * 
-	 * @return the updated Graph after the vertex-centric iteration has converged or
+	 * @return the updated Graph after the scatter-gather iteration has converged or
 	 * after maximumNumberOfIterations.
 	 */
-	public <M> Graph<K, VV, EV> runVertexCentricIteration(
+	public <M> Graph<K, VV, EV> runScatterGatherIteration(
 			VertexUpdateFunction<K, VV, M> vertexUpdateFunction,
 			MessagingFunction<K, VV, M, EV> messagingFunction,
-			int maximumNumberOfIterations, VertexCentricConfiguration parameters) {
+			int maximumNumberOfIterations, ScatterGatherConfiguration parameters) {
 
-		VertexCentricIteration<K, VV, M, EV> iteration = VertexCentricIteration.withEdges(
+		ScatterGatherIteration<K, VV, M, EV> iteration = ScatterGatherIteration.withEdges(
 				edges, vertexUpdateFunction, messagingFunction, maximumNumberOfIterations);
 
 		iteration.configure(parameters);
@@ -1676,6 +1733,47 @@ public class Graph<K, VV, EV> {
 
 		DataSet<Vertex<K, VV>> newVertices = vertices.runOperation(iteration);
 
+		return new Graph<K, VV, EV>(newVertices, this.edges, this.context);
+	}
+
+	/**
+	 * Runs a {@link VertexCentricIteration} on the graph.
+	 * No configuration options are provided.
+	 *
+	 * @param computeFunction the vertex compute function
+	 * @param combiner an optional message combiner
+	 * @param maximumNumberOfIterations maximum number of iterations to perform
+	 * 
+	 * @return the updated Graph after the vertex-centric iteration has converged or
+	 * after maximumNumberOfIterations.
+	 */
+	public <M> Graph<K, VV, EV> runVertexCentricIteration(
+			ComputeFunction<K, VV, EV, M> computeFunction, 
+			MessageCombiner<K, M> combiner, int maximumNumberOfIterations) {
+
+		return this.runVertexCentricIteration(computeFunction, combiner, maximumNumberOfIterations, null);
+	}
+
+	/**
+	 * Runs a {@link VertexCentricIteration} on the graph with configuration options.
+	 * 
+	 * @param computeFunction the vertex compute function
+	 * @param combiner an optional message combiner
+	 * @param maximumNumberOfIterations maximum number of iterations to perform
+	 * @param parameters the {@link VertexCentricConfiguration} parameters
+	 * 
+	 * @return the updated Graph after the vertex-centric iteration has converged or
+	 * after maximumNumberOfIterations.
+	 */
+	public <M> Graph<K, VV, EV> runVertexCentricIteration(
+			ComputeFunction<K, VV, EV, M> computeFunction,
+			MessageCombiner<K, M> combiner, int maximumNumberOfIterations,
+			VertexCentricConfiguration parameters) {
+
+		VertexCentricIteration<K, VV, EV, M> iteration = VertexCentricIteration.withEdges(
+				edges, computeFunction, maximumNumberOfIterations);
+		iteration.configure(parameters);
+		DataSet<Vertex<K, VV>> newVertices = this.getVertices().runOperation(iteration);
 		return new Graph<K, VV, EV>(newVertices, this.edges, this.context);
 	}
 

@@ -26,7 +26,7 @@ import java.net.URL;
 import java.util.ArrayList;
 import java.util.List;
 
-import org.apache.flink.api.common.ApplicationID;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.blob.BlobKey;
 import org.apache.flink.runtime.executiongraph.ExecutionAttemptID;
@@ -41,7 +41,6 @@ public class TaskDeploymentDescriptorTest {
 	@Test
 	public void testSerialization() {
 		try {
-			final ApplicationID appId = new ApplicationID();
 			final JobID jobID = new JobID();
 			final JobVertexID vertexID = new JobVertexID();
 			final ExecutionAttemptID execId = new ExecutionAttemptID();
@@ -56,10 +55,12 @@ public class TaskDeploymentDescriptorTest {
 			final List<InputGateDeploymentDescriptor> inputGates = new ArrayList<InputGateDeploymentDescriptor>(0);
 			final List<BlobKey> requiredJars = new ArrayList<BlobKey>(0);
 			final List<URL> requiredClasspaths = new ArrayList<URL>(0);
-	
-			final TaskDeploymentDescriptor orig = new TaskDeploymentDescriptor(appId, jobID, vertexID, execId, taskName,
-				indexInSubtaskGroup, currentNumberOfSubtasks, attemptNumber, jobConfiguration, taskConfiguration,
-				invokableClass.getName(), producedResults, inputGates, requiredJars, requiredClasspaths, 47);
+			final ExecutionConfig executionConfig = new ExecutionConfig();
+
+			final TaskDeploymentDescriptor orig = new TaskDeploymentDescriptor(jobID, vertexID, execId,
+				executionConfig, taskName, indexInSubtaskGroup, currentNumberOfSubtasks, attemptNumber,
+				jobConfiguration, taskConfiguration, invokableClass.getName(), producedResults, inputGates,
+				requiredJars, requiredClasspaths, 47);
 	
 			final TaskDeploymentDescriptor copy = CommonTestUtils.createCopySerializable(orig);
 	
@@ -69,7 +70,6 @@ public class TaskDeploymentDescriptorTest {
 			assertFalse(orig.getJobConfiguration() == copy.getJobConfiguration());
 			assertFalse(orig.getTaskConfiguration() == copy.getTaskConfiguration());
 
-			assertEquals(orig.getApplicationID(), copy.getApplicationID());
 			assertEquals(orig.getJobID(), copy.getJobID());
 			assertEquals(orig.getVertexID(), copy.getVertexID());
 			assertEquals(orig.getTaskName(), copy.getTaskName());
@@ -78,6 +78,9 @@ public class TaskDeploymentDescriptorTest {
 			assertEquals(orig.getAttemptNumber(), copy.getAttemptNumber());
 			assertEquals(orig.getProducedPartitions(), copy.getProducedPartitions());
 			assertEquals(orig.getInputGates(), copy.getInputGates());
+			// load serialized values in ExecutionConfig
+			copy.getExecutionConfig().deserializeUserCode(getClass().getClassLoader());
+			assertEquals(orig.getExecutionConfig(), copy.getExecutionConfig());
 
 			assertEquals(orig.getRequiredJarFiles(), copy.getRequiredJarFiles());
 			assertEquals(orig.getRequiredClasspaths(), copy.getRequiredClasspaths());

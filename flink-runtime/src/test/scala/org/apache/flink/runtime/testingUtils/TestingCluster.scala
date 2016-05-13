@@ -24,10 +24,13 @@ import akka.pattern.ask
 import akka.actor.{ActorRef, Props, ActorSystem}
 import akka.testkit.CallingThreadDispatcher
 import org.apache.flink.configuration.{ConfigConstants, Configuration}
+import org.apache.flink.runtime.clusterframework.FlinkResourceManager
+import org.apache.flink.runtime.clusterframework.types.ResourceID
+import org.apache.flink.runtime.executiongraph.restart.RestartStrategy
 import org.apache.flink.runtime.jobmanager.JobManager
 import org.apache.flink.runtime.leaderelection.LeaderElectionService
 import org.apache.flink.runtime.minicluster.FlinkMiniCluster
-import org.apache.flink.util.NetUtils
+import org.apache.flink.runtime.testutils.TestingResourceManager
 import org.apache.flink.runtime.taskmanager.TaskManager
 import org.apache.flink.runtime.testingUtils.TestingMessages.Alive
 
@@ -35,16 +38,16 @@ import scala.concurrent.{Await, Future}
 
 /**
  * Testing cluster which starts the [[JobManager]] and [[TaskManager]] actors with testing support
- * in the same [[ActorSystem]].
+ * in the same or separate [[ActorSystem]]s.
  *
  * @param userConfiguration Configuration object with the user provided configuration values
  * @param singleActorSystem true if all actors shall be running in the same [[ActorSystem]],
  *                          otherwise false
  */
 class TestingCluster(
-                      userConfiguration: Configuration,
-                      singleActorSystem: Boolean,
-                      synchronousDispatcher: Boolean)
+    userConfiguration: Configuration,
+    singleActorSystem: Boolean,
+    synchronousDispatcher: Boolean)
   extends FlinkMiniCluster(
     userConfiguration,
     singleActorSystem) {
@@ -59,9 +62,12 @@ class TestingCluster(
   override def generateConfiguration(userConfig: Configuration): Configuration = {
     val cfg = new Configuration()
     cfg.setString(ConfigConstants.JOB_MANAGER_IPC_ADDRESS_KEY, "localhost")
-    cfg.setInteger(ConfigConstants.JOB_MANAGER_IPC_PORT_KEY, NetUtils.getAvailablePort())
+    cfg.setInteger(ConfigConstants.JOB_MANAGER_IPC_PORT_KEY, 0)
+    cfg.setInteger(ConfigConstants.RESOURCE_MANAGER_IPC_PORT_KEY, 0)
     cfg.setInteger(ConfigConstants.TASK_MANAGER_MEMORY_SIZE_KEY, 10)
     cfg.setInteger(ConfigConstants.JOB_MANAGER_WEB_PORT_KEY, -1)
+
+    setDefaultCiConfig(cfg)
 
     cfg.addAll(userConfig)
     cfg
@@ -94,13 +100,14 @@ class TestingCluster(
     instanceManager,
     scheduler,
     libraryCacheManager,
-    executionRetries,
-    delayBetweenRetries,
+    restartStrategyFactory,
     timeout,
     archiveCount,
     leaderElectionService,
     submittedJobsGraphs,
-    checkpointRecoveryFactory) = JobManager.createJobManagerComponents(
+    checkpointRecoveryFactory,
+    savepointStore,
+    jobRecoveryTimeout) = JobManager.createJobManagerComponents(
       config,
       createLeaderElectionService())
 
@@ -115,12 +122,13 @@ class TestingCluster(
         scheduler,
         libraryCacheManager,
         archive,
-        executionRetries,
-        delayBetweenRetries,
+        restartStrategyFactory,
         timeout,
         leaderElectionService,
         submittedJobsGraphs,
-        checkpointRecoveryFactory))
+        checkpointRecoveryFactory,
+        savepointStore,
+        jobRecoveryTimeout))
 
     val dispatcherJobManagerProps = if (synchronousDispatcher) {
       // disable asynchronous futures (e.g. accumulator update in Heartbeat)
@@ -132,16 +140,43 @@ class TestingCluster(
     actorSystem.actorOf(dispatcherJobManagerProps, jobManagerName)
   }
 
+  override def startResourceManager(index: Int, system: ActorSystem): ActorRef = {
+    val config = configuration.clone()
+
+    val resourceManagerName = if(singleActorSystem) {
+      FlinkResourceManager.RESOURCE_MANAGER_NAME + "_" + (index + 1)
+    } else {
+      FlinkResourceManager.RESOURCE_MANAGER_NAME
+    }
+
+    val resourceManagerPort = config.getInteger(
+      ConfigConstants.RESOURCE_MANAGER_IPC_PORT_KEY,
+      ConfigConstants.DEFAULT_RESOURCE_MANAGER_IPC_PORT)
+
+    if(resourceManagerPort > 0) {
+      config.setInteger(ConfigConstants.RESOURCE_MANAGER_IPC_PORT_KEY, resourceManagerPort + index)
+    }
+
+    val testResourceManagerProps = Props(
+      new TestingResourceManager(
+        config,
+        createLeaderRetrievalService()
+      ))
+
+    system.actorOf(testResourceManagerProps, resourceManagerName)
+  }
+
   override def startTaskManager(index: Int, system: ActorSystem) = {
 
     val tmActorName = TaskManager.TASK_MANAGER_NAME + "_" + (index + 1)
 
     TaskManager.startTaskManagerComponentsAndActor(
       configuration,
+      ResourceID.generate(),
       system,
       hostname,
       Some(tmActorName),
-      Some(createLeaderRetrievalService),
+      Some(createLeaderRetrievalService()),
       numTaskManagers == 1,
       classOf[TestingTaskManager])
   }
@@ -149,6 +184,10 @@ class TestingCluster(
 
   def createLeaderElectionService(): Option[LeaderElectionService] = {
     None
+  }
+
+  def getRestartStrategy(restartStrategy: RestartStrategy) = {
+    restartStrategy
   }
 
   @throws(classOf[TimeoutException])
@@ -176,11 +215,18 @@ class TestingCluster(
 
     val jmsAliveFutures = jobManagerActors map {
       _ map {
-        tm => (tm ? Alive)(timeout)
+        jm => (jm ? Alive)(timeout)
       }
     } getOrElse(Seq())
 
-    val combinedFuture = Future.sequence(tmsAliveFutures ++ jmsAliveFutures)
+    val resourceManagersAliveFutures = resourceManagerActors map {
+      _ map {
+        rm => (rm ? Alive)(timeout)
+      }
+    } getOrElse(Seq())
+
+    val combinedFuture = Future.sequence(tmsAliveFutures ++ jmsAliveFutures ++
+                                           resourceManagersAliveFutures)
 
     Await.ready(combinedFuture, timeout)
   }

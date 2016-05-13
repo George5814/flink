@@ -18,7 +18,7 @@
 
 package org.apache.flink.runtime.taskmanager;
 
-import org.apache.flink.api.common.ApplicationID;
+import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.api.common.TaskInfo;
 import org.apache.flink.configuration.Configuration;
@@ -48,7 +48,6 @@ import static com.google.common.base.Preconditions.checkNotNull;
  */
 public class RuntimeEnvironment implements Environment {
 
-	private final ApplicationID appId;
 	private final JobID jobId;
 	private final JobVertexID jobVertexId;
 	private final ExecutionAttemptID executionId;
@@ -57,7 +56,8 @@ public class RuntimeEnvironment implements Environment {
 	
 	private final Configuration jobConfiguration;
 	private final Configuration taskConfiguration;
-	
+	private final ExecutionConfig executionConfig;
+
 	private final ClassLoader userCodeClassLoader;
 
 	private final MemoryManager memManager;
@@ -79,10 +79,10 @@ public class RuntimeEnvironment implements Environment {
 	// ------------------------------------------------------------------------
 
 	public RuntimeEnvironment(
-			ApplicationID appId,
 			JobID jobId,
 			JobVertexID jobVertexId,
 			ExecutionAttemptID executionId,
+			ExecutionConfig executionConfig,
 			TaskInfo taskInfo,
 			Configuration jobConfiguration,
 			Configuration taskConfiguration,
@@ -98,11 +98,11 @@ public class RuntimeEnvironment implements Environment {
 			ActorGateway jobManager,
 			TaskManagerRuntimeInfo taskManagerInfo) {
 
-		this.appId = checkNotNull(appId);
 		this.jobId = checkNotNull(jobId);
 		this.jobVertexId = checkNotNull(jobVertexId);
 		this.executionId = checkNotNull(executionId);
 		this.taskInfo = checkNotNull(taskInfo);
+		this.executionConfig = checkNotNull(executionConfig);
 		this.jobConfiguration = checkNotNull(jobConfiguration);
 		this.taskConfiguration = checkNotNull(taskConfiguration);
 		this.userCodeClassLoader = checkNotNull(userCodeClassLoader);
@@ -121,8 +121,8 @@ public class RuntimeEnvironment implements Environment {
 	// ------------------------------------------------------------------------
 
 	@Override
-	public ApplicationID getApplicationID() {
-		return appId;
+	public ExecutionConfig getExecutionConfig() {
+		return this.executionConfig;
 	}
 
 	@Override

@@ -55,7 +55,6 @@ import org.apache.flink.streaming.runtime.tasks.StreamIterationTail;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.io.IOException;
 import java.nio.charset.Charset;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -110,7 +109,8 @@ public class StreamingJobGraphGenerator {
 	}
 
 	public JobGraph createJobGraph() {
-		jobGraph = new JobGraph(streamGraph.getJobName(), streamGraph.getExecutionConfig());
+
+		jobGraph = new JobGraph(streamGraph.getJobName());
 
 		// make sure that all vertices start immediately
 		jobGraph.setScheduleMode(ScheduleMode.ALL);
@@ -126,15 +126,11 @@ public class StreamingJobGraphGenerator {
 		setPhysicalEdges();
 
 		setSlotSharing();
-		
+
 		configureCheckpointing();
 
-		try {
-			// make sure that we can send the ExecutionConfig without user code object problems
-			jobGraph.getExecutionConfig().serializeUserCode();
-		} catch (IOException e) {
-			throw new IllegalStateException("Could not serialize ExecutionConfig.", e);
-		}
+		// set the ExecutionConfig last when it has been finalized
+		jobGraph.setExecutionConfig(streamGraph.getExecutionConfig());
 
 		return jobGraph;
 	}
@@ -171,14 +167,15 @@ public class StreamingJobGraphGenerator {
 	 */
 	private void setChaining(Map<Integer, byte[]> hashes) {
 		for (Integer sourceNodeId : streamGraph.getSourceIDs()) {
-			createChain(sourceNodeId, sourceNodeId, hashes);
+			createChain(sourceNodeId, sourceNodeId, hashes, 0);
 		}
 	}
 
 	private List<StreamEdge> createChain(
 			Integer startNodeId,
 			Integer currentNodeId,
-			Map<Integer, byte[]> hashes) {
+			Map<Integer, byte[]> hashes,
+			int chainIndex) {
 
 		if (!builtVertices.contains(startNodeId)) {
 
@@ -196,12 +193,12 @@ public class StreamingJobGraphGenerator {
 			}
 
 			for (StreamEdge chainable : chainableOutputs) {
-				transitiveOutEdges.addAll(createChain(startNodeId, chainable.getTargetId(), hashes));
+				transitiveOutEdges.addAll(createChain(startNodeId, chainable.getTargetId(), hashes, chainIndex + 1));
 			}
 
 			for (StreamEdge nonChainable : nonChainableOutputs) {
 				transitiveOutEdges.add(nonChainable);
-				createChain(nonChainable.getTargetId(), nonChainable.getTargetId(), hashes);
+				createChain(nonChainable.getTargetId(), nonChainable.getTargetId(), hashes, 0);
 			}
 
 			chainedNames.put(currentNodeId, createChainedName(currentNodeId, chainableOutputs));
@@ -215,6 +212,7 @@ public class StreamingJobGraphGenerator {
 			if (currentNodeId.equals(startNodeId)) {
 
 				config.setChainStart();
+				config.setChainIndex(0);
 				config.setOutEdgesInOrder(transitiveOutEdges);
 				config.setOutEdges(streamGraph.getStreamNode(currentNodeId).getOutEdges());
 
@@ -231,6 +229,7 @@ public class StreamingJobGraphGenerator {
 				if (chainedConfs == null) {
 					chainedConfigs.put(startNodeId, new HashMap<Integer, StreamConfig>());
 				}
+				config.setChainIndex(chainIndex);
 				chainedConfigs.get(startNodeId).put(currentNodeId, config);
 			}
 

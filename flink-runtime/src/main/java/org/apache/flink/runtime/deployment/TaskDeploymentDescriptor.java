@@ -45,6 +45,7 @@ public final class TaskDeploymentDescriptor implements Serializable {
 
 	/** The ID of the job the tasks belongs to. */
 	private final JobID jobID;
+	private final String jobName;
 
 	/** The task's job vertex ID. */
 	private final JobVertexID vertexID;
@@ -90,7 +91,7 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	private final SerializedValue<StateHandle<?>> operatorState;
 
 	/** The execution configuration (see {@link ExecutionConfig}) related to the specific job. */
-	private final ExecutionConfig executionConfig;
+	private final SerializedValue<ExecutionConfig> serializedExecutionConfig;
 
 	private long recoveryTimestamp;
 		
@@ -99,9 +100,10 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	 */
 	public TaskDeploymentDescriptor(
 			JobID jobID,
+			String jobName,
 			JobVertexID vertexID,
 			ExecutionAttemptID executionId,
-			ExecutionConfig executionConfig,
+			SerializedValue<ExecutionConfig> serializedExecutionConfig,
 			String taskName,
 			int indexInSubtaskGroup,
 			int numberOfSubtasks,
@@ -123,9 +125,10 @@ public final class TaskDeploymentDescriptor implements Serializable {
 		checkArgument(attemptNumber >= 0);
 
 		this.jobID = checkNotNull(jobID);
+		this.jobName = checkNotNull(jobName);
 		this.vertexID = checkNotNull(vertexID);
 		this.executionId = checkNotNull(executionId);
-		this.executionConfig = checkNotNull(executionConfig);
+		this.serializedExecutionConfig = checkNotNull(serializedExecutionConfig);
 		this.taskName = checkNotNull(taskName);
 		this.indexInSubtaskGroup = indexInSubtaskGroup;
 		this.numberOfSubtasks = numberOfSubtasks;
@@ -144,9 +147,10 @@ public final class TaskDeploymentDescriptor implements Serializable {
 
 	public TaskDeploymentDescriptor(
 		JobID jobID,
+		String jobName,
 		JobVertexID vertexID,
 		ExecutionAttemptID executionId,
-		ExecutionConfig executionConfig,
+		SerializedValue<ExecutionConfig> serializedExecutionConfig,
 		String taskName,
 		int indexInSubtaskGroup,
 		int numberOfSubtasks,
@@ -162,9 +166,10 @@ public final class TaskDeploymentDescriptor implements Serializable {
 
 		this(
 			jobID,
+			jobName,
 			vertexID,
 			executionId,
-			executionConfig,
+			serializedExecutionConfig,
 			taskName,
 			indexInSubtaskGroup,
 			numberOfSubtasks,
@@ -185,8 +190,8 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	 * Returns the execution configuration (see {@link ExecutionConfig}) related to the
 	 * specific job.
 	 */
-	public ExecutionConfig getExecutionConfig() {
-		return executionConfig;
+	public SerializedValue<ExecutionConfig> getSerializedExecutionConfig() {
+		return serializedExecutionConfig;
 	}
 
 	/**
@@ -195,6 +200,8 @@ public final class TaskDeploymentDescriptor implements Serializable {
 	public JobID getJobID() {
 		return jobID;
 	}
+	
+	public String getJobName() { return jobName; }
 
 	/**
 	 * Returns the task's execution vertex ID.

@@ -24,7 +24,9 @@ import org.apache.calcite.rel.convert.ConverterRule
 import org.apache.calcite.rel.core.JoinRelType
 import org.apache.calcite.rel.logical.LogicalJoin
 import org.apache.flink.api.java.operators.join.JoinType
+import org.apache.flink.api.table.TableException
 import org.apache.flink.api.table.plan.nodes.dataset.{DataSetJoin, DataSetConvention}
+
 import scala.collection.JavaConversions._
 
 class DataSetJoinRule
@@ -32,40 +34,48 @@ class DataSetJoinRule
       classOf[LogicalJoin],
       Convention.NONE,
       DataSetConvention.INSTANCE,
-      "DataSetJoinRule")
-  {
+      "DataSetJoinRule") {
 
-  /**
-   * Only translate INNER joins for now
-   */
   override def matches(call: RelOptRuleCall): Boolean = {
     val join: LogicalJoin = call.rel(0).asInstanceOf[LogicalJoin]
-    join.getJoinType.equals(JoinRelType.INNER)
-  }
 
-    def convert(rel: RelNode): RelNode = {
+    val joinInfo = join.analyzeCondition
 
-      val join: LogicalJoin = rel.asInstanceOf[LogicalJoin]
-      val traitSet: RelTraitSet = rel.getTraitSet.replace(DataSetConvention.INSTANCE)
-      val convLeft: RelNode = RelOptRule.convert(join.getInput(0), DataSetConvention.INSTANCE)
-      val convRight: RelNode = RelOptRule.convert(join.getInput(1), DataSetConvention.INSTANCE)
-      val joinInfo = join.analyzeCondition
-
-        new DataSetJoin(
-          rel.getCluster,
-          traitSet,
-          convLeft,
-          convRight,
-          rel.getRowType,
-          join.getCondition,
-          join.getRowType,
-          joinInfo,
-          joinInfo.pairs.toList,
-          JoinType.INNER,
-          null,
-          description)
+    // joins require an equi-condition or a conjunctive predicate with at least one equi-condition
+    val hasValidCondition = !joinInfo.pairs().isEmpty
+    // only inner joins are supported at the moment
+    val isInnerJoin = join.getJoinType.equals(JoinRelType.INNER)
+    if (!isInnerJoin) {
+      throw new TableException("OUTER JOIN is currently not supported.")
     }
+
+    // check that condition is valid and inner join
+    hasValidCondition && isInnerJoin
   }
+
+  override def convert(rel: RelNode): RelNode = {
+
+    val join: LogicalJoin = rel.asInstanceOf[LogicalJoin]
+    val traitSet: RelTraitSet = rel.getTraitSet.replace(DataSetConvention.INSTANCE)
+    val convLeft: RelNode = RelOptRule.convert(join.getInput(0), DataSetConvention.INSTANCE)
+    val convRight: RelNode = RelOptRule.convert(join.getInput(1), DataSetConvention.INSTANCE)
+    val joinInfo = join.analyzeCondition
+
+    new DataSetJoin(
+      rel.getCluster,
+      traitSet,
+      convLeft,
+      convRight,
+      rel.getRowType,
+      join.getCondition,
+      join.getRowType,
+      joinInfo,
+      joinInfo.pairs.toList,
+      JoinType.INNER,
+      null,
+      description)
+  }
+}
 
 object DataSetJoinRule {
   val INSTANCE: RelOptRule = new DataSetJoinRule

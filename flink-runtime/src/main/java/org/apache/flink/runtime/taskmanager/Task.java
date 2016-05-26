@@ -25,6 +25,7 @@ import org.apache.flink.api.common.cache.DistributedCache;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.Path;
+import org.apache.flink.metrics.groups.TaskMetricGroup;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
 import org.apache.flink.runtime.blob.BlobKey;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
@@ -59,6 +60,7 @@ import org.apache.flink.runtime.messages.checkpoint.DeclineCheckpoint;
 import org.apache.flink.runtime.state.StateHandle;
 import org.apache.flink.runtime.state.StateUtils;
 import org.apache.flink.util.SerializedValue;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -90,15 +92,15 @@ import static com.google.common.base.Preconditions.checkNotNull;
  * {@link org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable} have only data
  * readers, -writers, and certain event callbacks. The task connects those to the
  * network stack and actor messages, and tracks the state of the execution and
- * handles exceptions.</p>
+ * handles exceptions.
  *
  * <p>Tasks have no knowledge about how they relate to other tasks, or whether they
  * are the first attempt to execute the task, or a repeated attempt. All of that
  * is only known to the JobManager. All the task knows are its own runnable code,
  * the task's configuration, and the IDs of the intermediate results to consume and
- * produce (if any).</p>
+ * produce (if any).
  *
- * <p>Each Task is run by one dedicated thread.</p>
+ * <p>Each Task is run by one dedicated thread.
  */
 public class Task implements Runnable {
 
@@ -128,6 +130,7 @@ public class Task implements Runnable {
 	/** TaskInfo object for this task */
 	private final TaskInfo taskInfo;
 
+	/** The name of the task, including subtask indexes */
 	private final String taskNameWithSubtask;
 
 	/** The job-wide configuration object */
@@ -156,6 +159,9 @@ public class Task implements Runnable {
 
 	/** The BroadcastVariableManager to be used by this task */
 	private final BroadcastVariableManager broadcastVariableManager;
+
+	/** Serialized version of the job specific execution configuration (see {@link ExecutionConfig}). */
+	private final SerializedValue<ExecutionConfig> serializedExecutionConfig;
 
 	private final ResultPartition[] producedPartitions;
 
@@ -192,6 +198,9 @@ public class Task implements Runnable {
 	/** The thread that executes the task */
 	private final Thread executingThread;
 
+	/** Parent group for all metrics of this task */
+	private final TaskMetricGroup metrics;
+
 	// ------------------------------------------------------------------------
 	//  Fields that control the task execution. All these fields are volatile
 	//  (which means that they introduce memory barriers), to establish
@@ -212,18 +221,15 @@ public class Task implements Runnable {
 
 	/** Serial executor for asynchronous calls (checkpoints, etc), lazily initialized */
 	private volatile ExecutorService asyncCallDispatcher;
-	
+
 	/** The handle to the state that the operator was initialized with. Will be set to null after the
 	 * initialization, to be memory friendly */
 	private volatile SerializedValue<StateHandle<?>> operatorState;
 
 	private volatile long recoveryTs;
 
-	/** The job specific execution configuration (see {@link ExecutionConfig}). */
-	private final ExecutionConfig executionConfig;
-
-	/** Interval between two successive task cancellation attempts */
-	private final long taskCancellationInterval;
+	/** Initialized from the Flink configuration. May also be set at the ExecutionConfig */
+	private long taskCancellationInterval;
 
 	/**
 	 * <p><b>IMPORTANT:</b> This constructor may not start any work that would need to
@@ -239,7 +245,8 @@ public class Task implements Runnable {
 				FiniteDuration actorAskTimeout,
 				LibraryCacheManager libraryCache,
 				FileCache fileCache,
-				TaskManagerRuntimeInfo taskManagerConfig)
+				TaskManagerRuntimeInfo taskManagerConfig,
+				TaskMetricGroup metricGroup)
 	{
 		this.taskInfo = checkNotNull(tdd.getTaskInfo());
 		this.jobId = checkNotNull(tdd.getJobID());
@@ -253,7 +260,11 @@ public class Task implements Runnable {
 		this.nameOfInvokableClass = checkNotNull(tdd.getInvokableClassName());
 		this.operatorState = tdd.getOperatorState();
 		this.recoveryTs = tdd.getRecoveryTimestamp();
-		this.executionConfig = checkNotNull(tdd.getExecutionConfig());
+		this.serializedExecutionConfig = checkNotNull(tdd.getSerializedExecutionConfig());
+
+		this.taskCancellationInterval = jobConfiguration.getLong(
+			ConfigConstants.TASK_CANCELLATION_INTERVAL_MILLIS,
+			ConfigConstants.DEFAULT_TASK_CANCELLATION_INTERVAL_MILLIS);
 
 		this.memoryManager = checkNotNull(memManager);
 		this.ioManager = checkNotNull(ioManager);
@@ -270,15 +281,7 @@ public class Task implements Runnable {
 		this.taskManagerConfig = checkNotNull(taskManagerConfig);
 
 		this.executionListenerActors = new CopyOnWriteArrayList<ActorGateway>();
-
-		if (executionConfig.getTaskCancellationInterval() < 0) {
-			taskCancellationInterval = jobConfiguration.getLong(
-				ConfigConstants.TASK_CANCELLATION_INTERVAL_MILLIS,
-				ConfigConstants.DEFAULT_TASK_CANCELLATION_INTERVAL_MILLIS);
-		} else {
-			taskCancellationInterval = executionConfig.getTaskCancellationInterval();
-		}
-
+		this.metrics = metricGroup;
 
 		// create the reader and writer structures
 
@@ -467,9 +470,14 @@ public class Task implements Runnable {
 			// first of all, get a user-code classloader
 			// this may involve downloading the job's JAR files and/or classes
 			LOG.info("Loading JAR files for task " + taskNameWithSubtask);
-			final ClassLoader userCodeClassLoader = createUserCodeClassloader(libraryCache);
 
-			executionConfig.deserializeUserCode(userCodeClassLoader);
+			final ClassLoader userCodeClassLoader = createUserCodeClassloader(libraryCache);
+			final ExecutionConfig executionConfig = serializedExecutionConfig.deserializeValue(userCodeClassLoader);
+
+			if (executionConfig.getTaskCancellationInterval() >= 0) {
+				// override task cancellation interval from Flink config if set in ExecutionConfig
+				taskCancellationInterval = executionConfig.getTaskCancellationInterval();
+			}
 
 			// now load the task's invokable code
 			invokable = loadAndInstantiateInvokable(userCodeClassLoader, nameOfInvokableClass);
@@ -518,7 +526,7 @@ public class Task implements Runnable {
 					userCodeClassLoader, memoryManager, ioManager,
 					broadcastVariableManager, accumulatorRegistry,
 					splitProvider, distributedCacheEntries,
-					writers, inputGates, jobManager, taskManagerConfig);
+					writers, inputGates, jobManager, taskManagerConfig, metrics);
 
 			// let the task code create its readers and writers
 			invokable.setEnvironment(env);
@@ -694,6 +702,16 @@ public class Task implements Runnable {
 				String message = "FATAL - exception in task resource cleanup";
 				LOG.error(message, t);
 				notifyFatalError(message, t);
+			}
+			
+			// un-register the metrics at the end so that the task may already be
+			// counted as finished when this happens
+			// errors here will only be logged
+			try {
+				metrics.close();
+			}
+			catch (Throwable t) {
+				LOG.error("Error during metrics de-registration", t);
 			}
 		}
 	}

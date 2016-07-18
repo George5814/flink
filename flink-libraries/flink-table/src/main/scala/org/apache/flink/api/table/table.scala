@@ -17,17 +17,15 @@
  */
 package org.apache.flink.api.table
 
-import scala.collection.JavaConverters._
-
 import org.apache.calcite.rel.RelNode
-
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.operators.join.JoinType
+import org.apache.flink.api.table.expressions.{Asc, ExpressionParser, UnresolvedAlias, Expression, Ordering}
 import org.apache.flink.api.table.plan.RexNodeTranslator.extractAggregations
-import org.apache.flink.api.table.expressions._
 import org.apache.flink.api.table.plan.logical._
 import org.apache.flink.api.table.sinks.TableSink
-import org.apache.flink.api.table.typeutils.TypeConverter
+
+import scala.collection.JavaConverters._
 
 /**
   * A Table is the core component of the Table API.
@@ -251,16 +249,233 @@ class Table(
     * }}}
     */
   def join(right: Table): Table = {
+    join(right, None, JoinType.INNER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.join(right, "a = b")
+    * }}}
+    */
+  def join(right: Table, joinPredicate: String): Table = {
+    join(right, joinPredicate, JoinType.INNER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.join(right, 'a === 'b).select('a, 'b, 'd)
+    * }}}
+    */
+  def join(right: Table, joinPredicate: Expression): Table = {
+    join(right, Some(joinPredicate), JoinType.INNER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL left outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.leftOuterJoin(right, "a = b").select('a, 'b, 'd)
+    * }}}
+    */
+  def leftOuterJoin(right: Table, joinPredicate: String): Table = {
+    join(right, joinPredicate, JoinType.LEFT_OUTER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL left outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.leftOuterJoin(right, 'a === 'b).select('a, 'b, 'd)
+    * }}}
+    */
+  def leftOuterJoin(right: Table, joinPredicate: Expression): Table = {
+    join(right, Some(joinPredicate), JoinType.LEFT_OUTER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL right outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.rightOuterJoin(right, "a = b").select('a, 'b, 'd)
+    * }}}
+    */
+  def rightOuterJoin(right: Table, joinPredicate: String): Table = {
+    join(right, joinPredicate, JoinType.RIGHT_OUTER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL right outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.rightOuterJoin(right, 'a === 'b).select('a, 'b, 'd)
+    * }}}
+    */
+  def rightOuterJoin(right: Table, joinPredicate: Expression): Table = {
+    join(right, Some(joinPredicate), JoinType.RIGHT_OUTER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL full outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.fullOuterJoin(right, "a = b").select('a, 'b, 'd)
+    * }}}
+    */
+  def fullOuterJoin(right: Table, joinPredicate: String): Table = {
+    join(right, joinPredicate, JoinType.FULL_OUTER)
+  }
+
+  /**
+    * Joins two [[Table]]s. Similar to an SQL full outer join. The fields of the two joined
+    * operations must not overlap, use [[as]] to rename fields if necessary.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]] and its [[TableConfig]] must
+    * have nullCheck enabled.
+    *
+    * Example:
+    *
+    * {{{
+    *   left.fullOuterJoin(right, 'a === 'b).select('a, 'b, 'd)
+    * }}}
+    */
+  def fullOuterJoin(right: Table, joinPredicate: Expression): Table = {
+    join(right, Some(joinPredicate), JoinType.FULL_OUTER)
+  }
+
+  private def join(right: Table, joinPredicate: String, joinType: JoinType): Table = {
+    val joinPredicateExpr = ExpressionParser.parseExpression(joinPredicate)
+    join(right, Some(joinPredicateExpr), joinType)
+  }
+
+  private def join(right: Table, joinPredicate: Option[Expression], joinType: JoinType): Table = {
+
     // check that right table belongs to the same TableEnvironment
     if (right.tableEnv != this.tableEnv) {
       throw new ValidationException("Only tables from the same TableEnvironment can be joined.")
     }
-    new Table(tableEnv,
-      Join(this.logicalPlan, right.logicalPlan, JoinType.INNER, None).validate(tableEnv))
+    new Table(
+      tableEnv,
+      Join(this.logicalPlan, right.logicalPlan, joinType, joinPredicate).validate(tableEnv))
   }
 
   /**
-    * Union two [[Table]]s. Similar to an SQL UNION ALL. The fields of the two union operations
+    * Minus of two [[Table]]s with duplicate records removed.
+    * Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not
+    * exist in the right table. Duplicate records in the left table are returned
+    * exactly once, i.e., duplicates are removed. Both tables must have identical field types.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.minus(right)
+    * }}}
+    */
+  def minus(right: Table): Table = {
+    // check that right table belongs to the same TableEnvironment
+    if (right.tableEnv != this.tableEnv) {
+      throw new ValidationException("Only tables from the same TableEnvironment can be " +
+        "subtracted.")
+    }
+    new Table(tableEnv, Minus(logicalPlan, right.logicalPlan, all = false)
+      .validate(tableEnv))
+  }
+
+  /**
+    * Minus of two [[Table]]s. Similar to an SQL EXCEPT ALL.
+    * Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in
+    * the right table. A record that is present n times in the left table and m times
+    * in the right table is returned (n - m) times, i.e., as many duplicates as are present
+    * in the right table are removed. Both tables must have identical field types.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.minusAll(right)
+    * }}}
+    */
+  def minusAll(right: Table): Table = {
+    // check that right table belongs to the same TableEnvironment
+    if (right.tableEnv != this.tableEnv) {
+      throw new ValidationException("Only tables from the same TableEnvironment can be " +
+        "subtracted.")
+    }
+    new Table(tableEnv, Minus(logicalPlan, right.logicalPlan, all = true)
+      .validate(tableEnv))
+  }
+
+  /**
+    * Unions two [[Table]]s with duplicate records removed.
+    * Similar to an SQL UNION. The fields of the two union operations must fully overlap.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.union(right)
+    * }}}
+    */
+  def union(right: Table): Table = {
+    if (tableEnv.isInstanceOf[StreamTableEnvironment]) {
+      throw new TableException(s"Union on stream tables is currently not supported.")
+    }
+    // check that right table belongs to the same TableEnvironment
+    if (right.tableEnv != this.tableEnv) {
+      throw new ValidationException("Only tables from the same TableEnvironment can be unioned.")
+    }
+    new Table(tableEnv, Union(logicalPlan, right.logicalPlan, false).validate(tableEnv))
+  }
+
+  /**
+    * Unions two [[Table]]s. Similar to an SQL UNION ALL. The fields of the two union operations
     * must fully overlap.
     *
     * Note: Both tables must be bound to the same [[TableEnvironment]].
@@ -276,7 +491,59 @@ class Table(
     if (right.tableEnv != this.tableEnv) {
       throw new ValidationException("Only tables from the same TableEnvironment can be unioned.")
     }
-    new Table(tableEnv, Union(logicalPlan, right.logicalPlan).validate(tableEnv))
+    new Table(tableEnv, Union(logicalPlan, right.logicalPlan, true).validate(tableEnv))
+  }
+
+  /**
+    * Intersects two [[Table]]s with duplicate records removed. Intersect returns records that
+    * exist in both tables. If a record is present in one or both tables more than once, it is
+    * returned just once, i.e., the resulting table has no duplicate records. Similar to an
+    * SQL INTERSECT. The fields of the two intersect operations must fully overlap.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.intersect(right)
+    * }}}
+    */
+  def intersect(right: Table): Table = {
+    if (tableEnv.isInstanceOf[StreamTableEnvironment]) {
+      throw new TableException(s"Intersect on stream tables is currently not supported.")
+    }
+    // check that right table belongs to the same TableEnvironment
+    if (right.tableEnv != this.tableEnv) {
+      throw new ValidationException(
+        "Only tables from the same TableEnvironment can be intersected.")
+    }
+    new Table(tableEnv, Intersect(logicalPlan, right.logicalPlan, all = false).validate(tableEnv))
+  }
+
+  /**
+    * Intersects two [[Table]]s. IntersectAll returns records that exist in both tables.
+    * If a record is present in both tables more than once, it is returned as many times as it
+    * is present in both tables, i.e., the resulting table might have duplicate records. Similar
+    * to an SQL INTERSECT ALL. The fields of the two intersect operations must fully overlap.
+    *
+    * Note: Both tables must be bound to the same [[TableEnvironment]].
+    *
+    * Example:
+    *
+    * {{{
+    *   left.intersectAll(right)
+    * }}}
+    */
+  def intersectAll(right: Table): Table = {
+    if (tableEnv.isInstanceOf[StreamTableEnvironment]) {
+      throw new TableException(s"Intersect on stream tables is currently not supported.")
+    }
+    // check that right table belongs to the same TableEnvironment
+    if (right.tableEnv != this.tableEnv) {
+      throw new ValidationException(
+        "Only tables from the same TableEnvironment can be intersected.")
+    }
+    new Table(tableEnv, Intersect(logicalPlan, right.logicalPlan, all = true).validate(tableEnv))
   }
 
   /**
@@ -330,7 +597,7 @@ class Table(
     val rowType = getRelNode.getRowType
     val fieldNames: Array[String] = rowType.getFieldNames.asScala.toArray
     val fieldTypes: Array[TypeInformation[_]] = rowType.getFieldList.asScala
-      .map(f => TypeConverter.sqlTypeToTypeInfo(f.getType.getSqlTypeName)).toArray
+      .map(field => FlinkTypeFactory.toTypeInfo(field.getType)).toArray
 
     // configure the table sink
     val configuredSink = sink.configure(fieldNames, fieldTypes)

@@ -68,13 +68,13 @@ under the License.
 		<module>flink-examples</module>
 		<module>flink-clients</module>
 		<module>flink-tests</module>
-		<module>flink-test-utils</module>
+		<module>flink-test-utils-parent</module>
 		<module>flink-libraries</module>
 		<module>flink-scala-shell</module>
 		<module>flink-quickstart</module>
 		<module>flink-contrib</module>
 		<module>flink-dist</module>
-		<module>flink-metric-reporters</module>
+		<module>flink-metrics</module>
 	</modules>
 
 	<properties>
@@ -82,6 +82,8 @@ under the License.
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<!-- Mutable name of the hadoop shading artifact. The module name can contain a scala version suffix. -->
 		<shading-artifact.name>error</shading-artifact.name>
+		<!-- Internal property to reduce build times on TravisCi -->
+		<flink-fast-tests-pattern>never-match-me</flink-fast-tests-pattern>
 		<!-- The shading artifact module name can be used as a module name. it does not get a scala version suffix -->
 		<shading-artifact-module.name>error</shading-artifact-module.name>
 		<hadoop-one.version>1.2.1</hadoop-one.version>
@@ -89,7 +91,7 @@ under the License.
 		<!-- Need to use a user property here because the surefire
 			 forkCount is not exposed as a property. With this we can set
 			 it on the "mvn" commandline in travis. -->
-		<flink.forkCount>1.5C</flink.forkCount>
+		<flink.forkCount>1C</flink.forkCount>
 		<flink.reuseForks>true</flink.reuseForks>
 		<log4j.configuration>log4j-test.properties</log4j.configuration>
 		<slf4j.version>1.7.7</slf4j.version>
@@ -105,6 +107,7 @@ under the License.
 		<curator.version>2.8.0</curator.version>
 		<jackson.version>2.7.4</jackson.version>
 		<metrics.version>3.1.0</metrics.version>
+		<junit.version>4.11</junit.version>
 	</properties>
 
 	<dependencies>
@@ -148,7 +151,7 @@ under the License.
 		<dependency>
 			<groupId>junit</groupId>
 			<artifactId>junit</artifactId>
-			<version>4.11</version>
+			<version>${junit.version}</version>
 			<type>jar</type>
 			<scope>test</scope>
 		</dependency>
@@ -212,6 +215,7 @@ under the License.
 				<artifactId>avro</artifactId>
 				<version>1.7.6</version>
 			</dependency>
+			
 			<dependency>
 				<groupId>org.apache.avro</groupId>
 				<artifactId>avro-ipc</artifactId>
@@ -222,7 +226,7 @@ under the License.
 			<dependency>
 				<groupId>commons-cli</groupId>
 				<artifactId>commons-cli</artifactId>
-				<version>1.2</version>
+				<version>1.3.1</version>
 			</dependency>
 
 			<dependency>
@@ -505,7 +509,7 @@ under the License.
 		<profile>
 			<!-- used for aggregating  ScalaDoc with JavaDoc -->
 			<id>aggregate-scaladoc</id>
-                        <dependencies>
+			<dependencies>
 				<dependency>
 					<!--
 					This is necessary for building the java docs using Java 8. Otherwise the javadoc
@@ -740,10 +744,83 @@ under the License.
 				</plugins>
 			</build>
 		</profile>
+		<!--
+			Test profile A excludes all tests starting with (A-M).
+			profile B excludes tests (N-Z).
+			This allows us to split up the test execution into separate profiles.
+		-->
+		<profile>
+			<id>flink-fast-tests-a</id>
+			<properties>
+				<flink-fast-tests-pattern>%regex[.*/[A-M].*]</flink-fast-tests-pattern>
+			</properties>
+		</profile>
+		<profile>
+			<id>flink-fast-tests-b</id>
+			<properties>
+				<flink-fast-tests-pattern>%regex[.*/[N-Z].*]</flink-fast-tests-pattern>
+			</properties>
+		</profile>
 	</profiles>
 
 	<build>
 		<plugins>
+			<plugin>
+				<groupId>com.github.siom79.japicmp</groupId>
+				<artifactId>japicmp-maven-plugin</artifactId>
+				<version>0.7.0</version>
+				<configuration>
+					<oldVersion>
+						<dependency>
+							<groupId>org.apache.flink</groupId>
+							<artifactId>${project.artifactId}</artifactId>
+							<version>1.0.0</version>
+							<type>${project.packaging}</type>
+						</dependency>
+					</oldVersion>
+					<newVersion>
+						<file>
+							<path>${project.build.directory}/${project.artifactId}-${project.version}.${project.packaging}</path>
+						</file>
+					</newVersion>
+					<parameter>
+						<onlyModified>true</onlyModified>
+						<includes>
+							<include>@org.apache.flink.annotation.Public</include>
+						</includes>
+						<excludes>
+							<exclude>@org.apache.flink.annotation.PublicEvolving</exclude>
+							<exclude>@org.apache.flink.annotation.Internal</exclude>
+						</excludes>
+						<accessModifier>public</accessModifier>
+						<breakBuildOnModifications>false</breakBuildOnModifications>
+						<breakBuildOnBinaryIncompatibleModifications>true</breakBuildOnBinaryIncompatibleModifications>
+						<breakBuildOnSourceIncompatibleModifications>true</breakBuildOnSourceIncompatibleModifications>
+						<onlyBinaryIncompatible>false</onlyBinaryIncompatible>
+						<includeSynthetic>true</includeSynthetic>
+						<ignoreMissingClasses>false</ignoreMissingClasses>
+						<skipPomModules>true</skipPomModules>
+						<!-- Don't break build on newly added maven modules -->
+						<ignoreNonResolvableArtifacts>true</ignoreNonResolvableArtifacts>
+					</parameter>
+					<skip>false</skip>
+					<dependencies>
+						<dependency>
+							<groupId>org.apache.flink</groupId>
+							<artifactId>flink-annotations</artifactId>
+							<version>${project.version}</version>
+						</dependency>
+					</dependencies>
+				</configuration>
+				<executions>
+					<execution>
+						<phase>verify</phase>
+						<goals>
+							<goal>cmp</goal>
+						</goals>
+					</execution>
+				</executions>
+			</plugin>
 
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
@@ -808,11 +885,12 @@ under the License.
 					</licenseFamilies>
 					<excludes>
 						<!-- Additional files like .gitignore etc.-->
-						<exclude>**/.*</exclude>
+						<exclude>**/.*/**</exclude>
 						<exclude>**/*.prefs</exclude>
 						<exclude>**/*.log</exclude>
 						<!-- External web libraries. -->
 						<exclude>docs/**/bootstrap*</exclude>
+						<exclude>docs/Gemfile.lock</exclude>
 						<exclude>docs/img/*.svg</exclude>
 						<exclude>**/resources/**/font-awesome/**</exclude>
 						<exclude>**/resources/**/jquery*</exclude>
@@ -851,7 +929,6 @@ under the License.
 						<exclude>**/flink-bin/conf/slaves</exclude>
 						<exclude>**/flink-bin/conf/masters</exclude>
 						<exclude>**/flink-bin/conf/zoo.cfg</exclude>
-						<exclude>flink-contrib/docker-flink/flink/conf/slaves</exclude>
 						<!-- Administrative files in the main trunk. -->
 						<exclude>**/README.md</exclude>
 						<exclude>CHANGELOG</exclude>
@@ -865,7 +942,7 @@ under the License.
 						<!-- Generated content -->
 						<exclude>out/**</exclude>
 						<exclude>**/target/**</exclude>
-						<exclude>docs/_site/**</exclude>
+						<exclude>docs/content/**</exclude>
 						<exclude>**/scalastyle-output.xml</exclude>
 						<exclude>build-target/**</exclude>
 						<!-- Tools: watchdog -->
@@ -911,7 +988,8 @@ under the License.
 			<plugin>
 				<groupId>org.apache.maven.plugins</groupId>
 				<artifactId>maven-surefire-plugin</artifactId>
-				<version>2.19.1</version>
+				<!-- Do NOT use a version >=2.19.X, as test cases may get stuck before execution. See SUREFIRE-1255 -->
+				<version>2.18.1</version>
 				<configuration>
 					<forkCount>${flink.forkCount}</forkCount>
 					<reuseForks>${flink.reuseForks}</reuseForks>
@@ -931,6 +1009,7 @@ under the License.
 						<configuration>
 							<excludes>
 								<exclude>**/*ITCase.*</exclude>
+								<exclude>${flink-fast-tests-pattern}</exclude>
 							</excludes>
 						</configuration>
 					</execution>
@@ -944,6 +1023,9 @@ under the License.
 							<includes>
 								<include>**/*ITCase.*</include>
 							</includes>
+							<excludes>
+								<exclude>${flink-fast-tests-pattern}</exclude>
+							</excludes>
 							<reuseForks>false</reuseForks>
 						</configuration>
 					</execution>
@@ -1162,6 +1244,13 @@ under the License.
 						<outputFile>${project.basedir}/target/scalastyle-output.xml</outputFile>
 						<outputEncoding>UTF-8</outputEncoding>
 					</configuration>
+				</plugin>
+
+				<!-- set scala maven plugin version -->
+				<plugin>
+					<groupId>net.alchim31.maven</groupId>
+					<artifactId>scala-maven-plugin</artifactId>
+					<version>3.2.2</version>
 				</plugin>
 			</plugins>
 		</pluginManagement>

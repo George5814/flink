@@ -43,7 +43,8 @@ public final class ConfigConstants {
 
 	/**
 	 * Defines the restart strategy to be used. It can be "off", "none", "disable" to be disabled or
-	 * it can be "fixeddelay", "fixed-delay" to use the FixedDelayRestartStrategy. You can also
+	 * it can be "fixeddelay", "fixed-delay" to use the FixedDelayRestartStrategy or it can
+	 * be "failurerate", "failure-rate" to use FailureRateRestartStrategy. You can also
 	 * specify a class name which implements the RestartStrategy interface and has a static
 	 * create method which takes a Configuration object.
 	 */
@@ -57,11 +58,32 @@ public final class ConfigConstants {
 	public static final String RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS = "restart-strategy.fixed-delay.attempts";
 
 	/**
-	 * Delay between two consecutive restart attempts. It can be specified using Scala's
+	 * Delay between two consecutive restart attempts in FixedDelayRestartStrategy. It can be specified using Scala's
 	 * FiniteDuration notation: "1 min", "20 s"
 	 */
 	@PublicEvolving
 	public static final String RESTART_STRATEGY_FIXED_DELAY_DELAY = "restart-strategy.fixed-delay.delay";
+
+	/**
+	 * Maximum number of restarts in given time interval {@link #RESTART_STRATEGY_FAILURE_RATE_FAILURE_RATE_INTERVAL} before failing a job
+	 * in FailureRateRestartStrategy.
+	 */
+	@PublicEvolving
+	public static final String RESTART_STRATEGY_FAILURE_RATE_MAX_FAILURES_PER_INTERVAL = "restart-strategy.failure-rate.max-failures-per-interval";
+
+	/**
+	 * Time interval in which greater amount of failures than {@link #RESTART_STRATEGY_FAILURE_RATE_MAX_FAILURES_PER_INTERVAL} causes
+	 * job fail in FailureRateRestartStrategy. It can be specified using Scala's FiniteDuration notation: "1 min", "20 s"
+	 */
+	@PublicEvolving
+	public static final String RESTART_STRATEGY_FAILURE_RATE_FAILURE_RATE_INTERVAL = "restart-strategy.failure-rate.failure-rate-interval";
+
+	/**
+	 * Delay between two consecutive restart attempts in FailureRateRestartStrategy.
+	 * It can be specified using Scala's FiniteDuration notation: "1 min", "20 s".
+	 */
+	@PublicEvolving
+	public static final String RESTART_STRATEGY_FAILURE_RATE_DELAY = "restart-strategy.failure-rate.delay";
 
 	/**
 	 * Config parameter for the number of re-tries for failed tasks. Setting this
@@ -257,36 +279,39 @@ public final class ConfigConstants {
 	 */
 	public static final String FS_STREAM_OPENING_TIMEOUT_KEY = "taskmanager.runtime.fs_timeout";
 
-	
+	/**
+	 * Whether to use the LargeRecordHandler when spilling.
+	 */
+	public static final String USE_LARGE_RECORD_HANDLER_KEY = "taskmanager.runtime.large-record-handler";
+
+
 	// -------- Common Resource Framework Configuration (YARN & Mesos) --------
 
 	/**
 	 * Percentage of heap space to remove from containers (YARN / Mesos), to compensate
 	 * for other JVM memory usage.
 	 */
-	public static final String CONTAINERED_HEAP_CUTOFF_RATIO = "containered.heap-cutoff-ratio";
+	public static final String CONTAINERIZED_HEAP_CUTOFF_RATIO = "containerized.heap-cutoff-ratio";
 
 	/**
 	 * Minimum amount of heap memory to remove in containers, as a safety margin.
 	 */
-	public static final String CONTAINERED_HEAP_CUTOFF_MIN = "containered.heap-cutoff-min";
+	public static final String CONTAINERIZED_HEAP_CUTOFF_MIN = "containerized.heap-cutoff-min";
 
 	/**
 	 * Prefix for passing custom environment variables to Flink's master process.
 	 * For example for passing LD_LIBRARY_PATH as an env variable to the AppMaster, set:
-	 * yarn.application-master.env.LD_LIBRARY_PATH: "/usr/lib/native"
+	 * containerized.master.env.LD_LIBRARY_PATH: "/usr/lib/native"
 	 * in the flink-conf.yaml.
 	 */
-	public static final String CONTAINERED_MASTER_ENV_PREFIX = "containered.application-master.env.";
+	public static final String CONTAINERIZED_MASTER_ENV_PREFIX = "containerized.master.env.";
 
 	/**
-	 * Similar to the {@see CONTAINERED_MASTER_ENV_PREFIX}, this configuration prefix allows
+	 * Similar to the {@see CONTAINERIZED_MASTER_ENV_PREFIX}, this configuration prefix allows
 	 * setting custom environment variables for the workers (TaskManagers)
 	 */
-	public static final String CONTAINERED_TASK_MANAGER_ENV_PREFIX = "containered.taskmanager.env.";
+	public static final String CONTAINERIZED_TASK_MANAGER_ENV_PREFIX = "containerized.taskmanager.env.";
 
-	// --------------------------Standalone Setup -----------------------------
-	
 	
 	// ------------------------ YARN Configuration ------------------------
 
@@ -297,12 +322,14 @@ public final class ConfigConstants {
 
 	/**
 	 * Percentage of heap space to remove from containers started by YARN.
+	 * @deprecated in favor of {@code #CONTAINERIZED_HEAP_CUTOFF_RATIO}
 	 */
 	@Deprecated
 	public static final String YARN_HEAP_CUTOFF_RATIO = "yarn.heap-cutoff-ratio";
 
 	/**
 	 * Minimum amount of memory to remove from the heap space as a safety margin.
+	 * @deprecated in favor of {@code #CONTAINERIZED_HEAP_CUTOFF_MIN}
 	 */
 	@Deprecated
 	public static final String YARN_HEAP_CUTOFF_MIN = "yarn.heap-cutoff-min";
@@ -350,15 +377,21 @@ public final class ConfigConstants {
 	 * For example for passing LD_LIBRARY_PATH as an env variable to the AppMaster, set:
 	 * 	yarn.application-master.env.LD_LIBRARY_PATH: "/usr/lib/native"
 	 * in the flink-conf.yaml.
-	 * @deprecated Please use {@code CONTAINERED_MASTER_ENV_PREFIX}.
+	 * @deprecated Please use {@code CONTAINERIZED_MASTER_ENV_PREFIX}.
 	 */
 	@Deprecated
 	public static final String YARN_APPLICATION_MASTER_ENV_PREFIX = "yarn.application-master.env.";
 
+	// these default values are not used anymore, but remain here until Flink 2.0
+	@Deprecated
+	public static final String DEFAULT_YARN_APPLICATION_MASTER_PORT = "deprecated";
+	@Deprecated
+	public static final int DEFAULT_YARN_MIN_HEAP_CUTOFF = -1;
+
 	/**
 	 * Similar to the {@see YARN_APPLICATION_MASTER_ENV_PREFIX}, this configuration prefix allows
 	 * setting custom environment variables.
-	 * @deprecated Please use {@code CONTAINERED_TASK_MANAGER_ENV_PREFIX}.
+	 * @deprecated Please use {@code CONTAINERIZED_TASK_MANAGER_ENV_PREFIX}.
 	 */
 	@Deprecated
 	public static final String YARN_TASK_MANAGER_ENV_PREFIX = "yarn.taskmanager.env.";
@@ -614,6 +647,41 @@ public final class ConfigConstants {
 
 	public static final String ZOOKEEPER_MAX_RETRY_ATTEMPTS = "recovery.zookeeper.client.max-retry-attempts";
 
+	// ---------------------------- Metrics -----------------------------------
+
+	/** The port range from which JMX will pick one to listen for incoming connections. */
+	public static final String METRICS_JMX_PORT = "metrics.jmx.port";
+	
+	/** The class of the reporter to use. */
+	public static final String METRICS_REPORTER_CLASS = "metrics.reporter.class";
+	
+	/** A list of named parameters that are passed to the reporter. */
+	public static final String METRICS_REPORTER_ARGUMENTS = "metrics.reporter.arguments";
+	
+	/** The interval between reports. */
+	public static final String METRICS_REPORTER_INTERVAL = "metrics.reporter.interval";
+
+	/** The delimiter used to assemble the metric identifier. */
+	public static final String METRICS_SCOPE_DELIMITER = "metrics.scope.delimiter";
+
+	/** The scope format string that is applied to all metrics scoped to a JobManager. */
+	public static final String METRICS_SCOPE_NAMING_JM = "metrics.scope.jm";
+
+	/** The scope format string that is applied to all metrics scoped to a TaskManager. */
+	public static final String METRICS_SCOPE_NAMING_TM = "metrics.scope.tm";
+
+	/** The scope format string that is applied to all metrics scoped to a job on a JobManager. */
+	public static final String METRICS_SCOPE_NAMING_JM_JOB = "metrics.scope.jm.job";
+
+	/** The scope format string that is applied to all metrics scoped to a job on a TaskManager. */
+	public static final String METRICS_SCOPE_NAMING_TM_JOB = "metrics.scope.tm.job";
+
+	/** The scope format string that is applied to all metrics scoped to a task. */
+	public static final String METRICS_SCOPE_NAMING_TASK = "metrics.scope.task";
+
+	/** The scope format string that is applied to all metrics scoped to an operator. */
+	public static final String METRICS_SCOPE_NAMING_OPERATOR = "metrics.scope.operator";
+
 	// ------------------------------------------------------------------------
 	//                            Default Values
 	// ------------------------------------------------------------------------
@@ -751,6 +819,11 @@ public final class ConfigConstants {
 	 * The default timeout for filesystem stream opening: infinite (means max long milliseconds).
 	 */
 	public static final int DEFAULT_FS_STREAM_OPENING_TIMEOUT = 0;
+
+	/**
+	 * Whether to use the LargeRecordHandler when spilling.
+	 */
+	public static final boolean DEFAULT_USE_LARGE_RECORD_HANDLER = false;
 
 
 	// ------ Common Resource Framework Configuration (YARN & Mesos) ------
@@ -933,6 +1006,15 @@ public final class ConfigConstants {
 
 	/** ZooKeeper default leader port. */
 	public static final int DEFAULT_ZOOKEEPER_LEADER_PORT = 3888;
+
+	// ----------------------------- Environment Variables ----------------------------
+
+	/** The environment variable name which contains the location of the configuration directory */
+	public static final String ENV_FLINK_CONF_DIR = "FLINK_CONF_DIR";
+
+	/** The environment variable name which contains the location of the lib folder */
+	public static final String ENV_FLINK_LIB_DIR = "FLINK_LIB_DIR";
+
 
 	/**
 	 * Not instantiable.

@@ -15,22 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.flink.metrics;
 
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.metrics.groups.JobMetricGroup;
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
-import org.apache.flink.metrics.groups.Scope;
+import org.apache.flink.metrics.groups.AbstractMetricGroup;
 import org.apache.flink.metrics.groups.TaskManagerMetricGroup;
-import org.apache.flink.metrics.groups.TaskMetricGroup;
+import org.apache.flink.metrics.groups.scope.ScopeFormats;
 import org.apache.flink.metrics.reporter.Scheduled;
 import org.apache.flink.metrics.util.TestReporter;
+
+import org.apache.flink.util.TestLogger;
 import org.junit.Assert;
 import org.junit.Test;
 
-import java.util.List;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertTrue;
 
-public class MetricRegistryTest {
+public class MetricRegistryTest extends TestLogger {
+	
 	/**
 	 * Verifies that the reporter class argument is correctly used to instantiate and open the reporter.
 	 */
@@ -38,7 +42,7 @@ public class MetricRegistryTest {
 	public void testReporterInstantiation() {
 		Configuration config = new Configuration();
 
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter1.class.getName());
+		config.setString(ConfigConstants.METRICS_REPORTER_CLASS, TestReporter1.class.getName());
 
 		new MetricRegistry(config);
 
@@ -61,8 +65,8 @@ public class MetricRegistryTest {
 	public void testReporterArgumentForwarding() {
 		Configuration config = new Configuration();
 
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter2.class.getName());
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_ARGUMENTS, "--arg1 hello --arg2 world");
+		config.setString(ConfigConstants.METRICS_REPORTER_CLASS, TestReporter2.class.getName());
+		config.setString(ConfigConstants.METRICS_REPORTER_ARGUMENTS, "--arg1 hello --arg2 world");
 
 		new MetricRegistry(config);
 	}
@@ -84,8 +88,8 @@ public class MetricRegistryTest {
 	public void testReporterScheduling() throws InterruptedException {
 		Configuration config = new Configuration();
 
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter3.class.getName());
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_INTERVAL, "50 MILLISECONDS");
+		config.setString(ConfigConstants.METRICS_REPORTER_CLASS, TestReporter3.class.getName());
+		config.setString(ConfigConstants.METRICS_REPORTER_INTERVAL, "50 MILLISECONDS");
 
 		new MetricRegistry(config);
 
@@ -118,46 +122,12 @@ public class MetricRegistryTest {
 	}
 
 	/**
-	 * Verifies that groups are correctly created, nesting works, and names are properly forwarded to generate names.
-	 */
-	@Test
-	public void testMetricGroupGeneration() {
-		Configuration config = new Configuration();
-
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter4.class.getName());
-
-		MetricRegistry registry = new MetricRegistry(config);
-
-		MetricGroup root = new TaskManagerMetricGroup(registry, "host", "id");
-		root.counter("rootCounter");
-		root.addGroup("top").counter("topCounter");
-	}
-
-	protected static class TestReporter4 extends TestReporter {
-		@Override
-		public String generateName(String name, List<String> scope) {
-			if (name.compareTo("rootCounter") == 0) {
-				Assert.assertEquals("host", scope.get(0));
-				return "success";
-			} else if (name.compareTo("topCounter") == 0) {
-				Assert.assertEquals("host", scope.get(0));
-				Assert.assertEquals("taskmanager", scope.get(1));
-				return "success";
-			} else {
-				Assert.fail();
-				return null;
-			}
-		}
-	}
-
-	/**
 	 * Verifies that reporters implementing the Listener interface are notified when Metrics are added or removed.
 	 */
 	@Test
 	public void testListener() {
 		Configuration config = new Configuration();
-
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter6.class.getName());
+		config.setString(ConfigConstants.METRICS_REPORTER_CLASS, TestReporter6.class.getName());
 
 		MetricRegistry registry = new MetricRegistry(config);
 
@@ -165,8 +135,8 @@ public class MetricRegistryTest {
 		root.counter("rootCounter");
 		root.close();
 
-		Assert.assertTrue(TestReporter6.addCalled);
-		Assert.assertTrue(TestReporter6.removeCalled);
+		assertTrue(TestReporter6.addCalled);
+		assertTrue(TestReporter6.removeCalled);
 	}
 
 	protected static class TestReporter6 extends TestReporter {
@@ -174,17 +144,17 @@ public class MetricRegistryTest {
 		public static boolean removeCalled = false;
 
 		@Override
-		public void notifyOfAddedMetric(Metric metric, String name) {
+		public void notifyOfAddedMetric(Metric metric, String metricName, AbstractMetricGroup group) {
 			addCalled = true;
-			Assert.assertTrue(metric instanceof Counter);
-			Assert.assertEquals("rootCounter", name);
+			assertTrue(metric instanceof Counter);
+			assertEquals("rootCounter", metricName);
 		}
 
 		@Override
-		public void notifyOfRemovedMetric(Metric metric, String name) {
+		public void notifyOfRemovedMetric(Metric metric, String metricName, AbstractMetricGroup group) {
 			removeCalled = true;
 			Assert.assertTrue(metric instanceof Counter);
-			Assert.assertEquals("rootCounter", name);
+			Assert.assertEquals("rootCounter", metricName);
 		}
 	}
 
@@ -195,23 +165,30 @@ public class MetricRegistryTest {
 	public void testScopeConfig() {
 		Configuration config = new Configuration();
 
-		config.setString(MetricRegistry.KEY_METRICS_SCOPE_NAMING_TM, "A");
-		config.setString(MetricRegistry.KEY_METRICS_SCOPE_NAMING_JOB, "B");
-		config.setString(MetricRegistry.KEY_METRICS_SCOPE_NAMING_TASK, "C");
-		config.setString(MetricRegistry.KEY_METRICS_SCOPE_NAMING_OPERATOR, "D");
+		config.setString(ConfigConstants.METRICS_SCOPE_NAMING_TM, "A");
+		config.setString(ConfigConstants.METRICS_SCOPE_NAMING_TM_JOB, "B");
+		config.setString(ConfigConstants.METRICS_SCOPE_NAMING_TASK, "C");
+		config.setString(ConfigConstants.METRICS_SCOPE_NAMING_OPERATOR, "D");
 
-		Scope.ScopeFormat scopeConfig = new MetricRegistry(config).getScopeConfig();
+		ScopeFormats scopeConfig = MetricRegistry.createScopeConfig(config);
 
-		Assert.assertEquals("A", scopeConfig.getTaskManagerFormat());
-		Assert.assertEquals("B", scopeConfig.getJobFormat());
-		Assert.assertEquals("C", scopeConfig.getTaskFormat());
-		Assert.assertEquals("D", scopeConfig.getOperatorFormat());
+		assertEquals("A", scopeConfig.getTaskManagerFormat().format());
+		assertEquals("B", scopeConfig.getTaskManagerJobFormat().format());
+		assertEquals("C", scopeConfig.getTaskFormat().format());
+		assertEquals("D", scopeConfig.getOperatorFormat().format());
+	}
 
-		Scope.ScopeFormat emptyScopeConfig = new MetricRegistry(new Configuration()).getScopeConfig();
+	@Test
+	public void testConfigurableDelimiter() {
+		Configuration config = new Configuration();
+		config.setString(ConfigConstants.METRICS_SCOPE_DELIMITER, "_");
+		config.setString(ConfigConstants.METRICS_SCOPE_NAMING_TM, "A.B.C.D.E");
 
-		Assert.assertEquals(TaskManagerMetricGroup.DEFAULT_SCOPE_TM, emptyScopeConfig.getTaskManagerFormat());
-		Assert.assertEquals(JobMetricGroup.DEFAULT_SCOPE_JOB, emptyScopeConfig.getJobFormat());
-		Assert.assertEquals(TaskMetricGroup.DEFAULT_SCOPE_TASK, emptyScopeConfig.getTaskFormat());
-		Assert.assertEquals(OperatorMetricGroup.DEFAULT_SCOPE_OPERATOR, emptyScopeConfig.getOperatorFormat());
+		MetricRegistry registry = new MetricRegistry(config);
+
+		TaskManagerMetricGroup tmGroup = new TaskManagerMetricGroup(registry, "host", "id");
+		assertEquals("A_B_C_D_E_name", tmGroup.getMetricIdentifier("name"));
+
+		registry.shutdown();
 	}
 }

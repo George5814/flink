@@ -18,14 +18,10 @@
 
 package org.apache.flink.runtime.io.network.api.serialization;
 
-import org.apache.flink.configuration.ConfigConstants;
-import org.apache.flink.configuration.GlobalConfiguration;
 import org.apache.flink.core.io.IOReadableWritable;
 import org.apache.flink.core.memory.DataInputView;
 import org.apache.flink.core.memory.DataInputViewStreamWrapper;
 import org.apache.flink.core.memory.MemorySegment;
-import org.apache.flink.metrics.Counter;
-import org.apache.flink.metrics.groups.IOMetricGroup;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
 import org.apache.flink.runtime.io.network.buffer.Buffer;
 import org.apache.flink.runtime.util.DataInputDeserializer;
@@ -65,18 +61,9 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 
 	private AccumulatorRegistry.Reporter reporter;
 
-	private transient Counter numRecordsIn;
-	private transient Counter numBytesIn;
-
-	public SpillingAdaptiveSpanningRecordDeserializer() {
-		
-		String tempDirString = GlobalConfiguration.getString(
-				ConfigConstants.TASK_MANAGER_TMP_DIR_KEY,
-				ConfigConstants.DEFAULT_TASK_MANAGER_TMP_PATH);
-		String[] directories = tempDirString.split(",|" + File.pathSeparator);
-		
+	public SpillingAdaptiveSpanningRecordDeserializer(String[] tmpDirectories) {
 		this.nonSpanningWrapper = new NonSpanningWrapper();
-		this.spanningWrapper = new SpanningWrapper(directories);
+		this.spanningWrapper = new SpanningWrapper(tmpDirectories);
 	}
 
 	@Override
@@ -122,9 +109,6 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 			if (reporter != null) {
 				reporter.reportNumBytesIn(len);
 			}
-			if (numBytesIn != null) {
-				numBytesIn.inc(len);
-			}
 
 			if (len <= nonSpanningRemaining - 4) {
 				// we can get a full record from here
@@ -133,9 +117,6 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 
 					if (reporter != null) {
 						reporter.reportNumRecordsIn(1);
-					}
-					if (numRecordsIn != null) {
-						numRecordsIn.inc();
 					}
 
 					int remaining = this.nonSpanningWrapper.remaining();
@@ -176,9 +157,6 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 			if (reporter != null) {
 				reporter.reportNumRecordsIn(1);
 			}
-			if (numRecordsIn != null) {
-				numRecordsIn.inc();
-			}
 			
 			// move the remainder to the non-spanning wrapper
 			// this does not copy it, only sets the memory segment
@@ -208,12 +186,6 @@ public class SpillingAdaptiveSpanningRecordDeserializer<T extends IOReadableWrit
 	public void setReporter(AccumulatorRegistry.Reporter reporter) {
 		this.reporter = reporter;
 		this.spanningWrapper.setReporter(reporter);
-	}
-
-	@Override
-	public void instantiateMetrics(IOMetricGroup metrics) {
-		numBytesIn = metrics.getBytesInCounter();
-		numRecordsIn = metrics.getRecordsInCounter();
 	}
 
 

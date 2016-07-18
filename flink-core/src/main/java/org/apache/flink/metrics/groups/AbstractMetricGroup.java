@@ -19,20 +19,21 @@
 package org.apache.flink.metrics.groups;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.metrics.CharacterFilter;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.MetricRegistry;
+import org.apache.flink.metrics.SimpleCounter;
 
+import org.apache.flink.metrics.groups.scope.ScopeFormat;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 import static org.apache.flink.util.Preconditions.checkNotNull;
 
@@ -55,31 +56,78 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 	/** shared logger */
 	private static final Logger LOG = LoggerFactory.getLogger(MetricGroup.class);
 
-	private static final String METRIC_NAME_REGEX = "[a-zA-Z0-9]*";
-	
-	/** The pattern that metric and group names have to match */
-	private static final Pattern METRIC_NAME_PATTERN = Pattern.compile(METRIC_NAME_REGEX);
-
 	// ------------------------------------------------------------------------
 
 	/** The registry that this metrics group belongs to */
 	protected final MetricRegistry registry;
 
 	/** All metrics that are directly contained in this group */
-	protected final Map<String, Metric> metrics = new HashMap<>();
+	private final Map<String, Metric> metrics = new HashMap<>();
 
 	/** All metric subgroups of this group */
-	protected final Map<String, MetricGroup> groups = new HashMap<>();
+	private final Map<String, MetricGroup> groups = new HashMap<>();
+
+	/** The metrics scope represented by this group.
+	 *  For example ["host-7", "taskmanager-2", "window_word_count", "my-mapper" ]. */
+	private final String[] scopeComponents;
+
+	/** The metrics scope represented by this group, as a concatenated string, lazily computed.
+	 * For example: "host-7.taskmanager-2.window_word_count.my-mapper" */
+	private String scopeString;
 
 	/** Flag indicating whether this group has been closed */
 	private volatile boolean closed;
 
 	// ------------------------------------------------------------------------
-	
-	public AbstractMetricGroup(MetricRegistry registry) {
+
+	public AbstractMetricGroup(MetricRegistry registry, String[] scope) {
 		this.registry = checkNotNull(registry);
+		this.scopeComponents = checkNotNull(scope);
 	}
 
+	/**
+	 * Gets the scope as an array of the scope components, for example
+	 * {@code ["host-7", "taskmanager-2", "window_word_count", "my-mapper"]}
+	 */
+	public String[] getScopeComponents() {
+		return scopeComponents;
+	}
+
+	/**
+	 * Returns the fully qualified metric name, for example
+	 * {@code "host-7.taskmanager-2.window_word_count.my-mapper.metricName"}
+	 * 
+	 * @param metricName metric name
+	 * @return fully qualified metric name
+     */
+	public String getMetricIdentifier(String metricName) {
+		return getMetricIdentifier(metricName, null);
+	}
+
+	/**
+	 * Returns the fully qualified metric name, for example
+	 * {@code "host-7.taskmanager-2.window_word_count.my-mapper.metricName"}
+	 *
+	 * @param metricName metric name
+	 * @param filter character filter which is applied to the scope components if not null.
+	 * @return fully qualified metric name
+	 */
+	public String getMetricIdentifier(String metricName, CharacterFilter filter) {
+		if (scopeString == null) {
+			if (filter != null) {
+				scopeString = ScopeFormat.concat(filter, registry.getDelimiter(), scopeComponents);
+			} else {
+				scopeString = ScopeFormat.concat(registry.getDelimiter(), scopeComponents);
+			}
+		}
+
+		if (filter != null) {
+			return scopeString + registry.getDelimiter() + filter.filterCharacters(metricName);
+		} else {
+			return scopeString + registry.getDelimiter() + metricName;
+		}
+	}
+	
 	// ------------------------------------------------------------------------
 	//  Closing
 	// ------------------------------------------------------------------------
@@ -111,25 +159,6 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 	}
 
 	// -----------------------------------------------------------------------------------------------------------------
-	//  Scope
-	// -----------------------------------------------------------------------------------------------------------------
-
-	/**
-	 * Generates the full scope based on the default/configured format that applies to all metrics within this group.
-	 *
-	 * @return generated scope
-	 */
-	public abstract List<String> generateScope();
-
-	/**
-	 * Generates the full scope based on the given format that applies to all metrics within this group.
-	 *
-	 * @param format format string
-	 * @return generated scope
-	 */
-	public abstract List<String> generateScope(Scope.ScopeFormat format);
-
-	// -----------------------------------------------------------------------------------------------------------------
 	//  Metrics
 	// -----------------------------------------------------------------------------------------------------------------
 
@@ -140,20 +169,40 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 
 	@Override
 	public Counter counter(String name) {
-		Counter counter = new Counter();
+		return counter(name, new SimpleCounter());
+	}
+	
+	@Override
+	public <C extends Counter> C counter(int name, C counter) {
+		return counter(String.valueOf(name), counter);
+	}
+
+	@Override
+	public <C extends Counter> C counter(String name, C counter) {
 		addMetric(name, counter);
 		return counter;
 	}
 
 	@Override
-	public <T> Gauge<T> gauge(int name, Gauge<T> gauge) {
+	public <T, G extends Gauge<T>> G gauge(int name, G gauge) {
 		return gauge(String.valueOf(name), gauge);
 	}
 
 	@Override
-	public <T> Gauge<T> gauge(String name, Gauge<T> gauge) {
+	public <T, G extends Gauge<T>> G gauge(String name, G gauge) {
 		addMetric(name, gauge);
 		return gauge;
+	}
+
+	@Override
+	public <H extends Histogram> H histogram(int name, H histogram) {
+		return histogram(String.valueOf(name), histogram);
+	}
+
+	@Override
+	public <H extends Histogram> H histogram(String name, H histogram) {
+		addMetric(name, histogram);
+		return histogram;
 	}
 
 	/**
@@ -164,12 +213,6 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 	 * @param metric the metric to register
 	 */
 	protected void addMetric(String name, Metric metric) {
-		Matcher nameMatcher = METRIC_NAME_PATTERN.matcher(name);
-		if (!nameMatcher.matches()) {
-			throw new IllegalArgumentException("Metric names may not contain special characters or spaces. " +
-					"Allowed is: " + METRIC_NAME_REGEX);
-		}
-
 		// add the metric only if the group is still open
 		synchronized (this) {
 			if (!closed) {
@@ -185,7 +228,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 						// we warn here, rather than failing, because metrics are tools that should not fail the
 						// program when used incorrectly
 						LOG.warn("Name collision: Adding a metric with the same name as a metric subgroup: '" +
-								name + "'. Metric might not get properly reported. (" + generateScope() + ')');
+								name + "'. Metric might not get properly reported. (" + scopeString + ')');
 					}
 
 					registry.register(metric, name, this);
@@ -197,7 +240,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 					// we warn here, rather than failing, because metrics are tools that should not fail the
 					// program when used incorrectly
 					LOG.warn("Name collision: Group already contains a Metric with the name '" +
-							name + "'. Metric will not be reported. (" + generateScope() + ')');
+							name + "'. Metric will not be reported. (" + scopeString + ')');
 				}
 			}
 		}
@@ -221,7 +264,7 @@ public abstract class AbstractMetricGroup implements MetricGroup {
 				// program when used incorrectly
 				if (metrics.containsKey(name)) {
 					LOG.warn("Name collision: Adding a metric subgroup with the same name as an existing metric: '" +
-							name + "'. Metric might not get properly reported. (" + generateScope() + ')');
+							name + "'. Metric might not get properly reported. (" + scopeString + ')');
 				}
 
 				MetricGroup newGroup = new GenericMetricGroup(registry, this, name);

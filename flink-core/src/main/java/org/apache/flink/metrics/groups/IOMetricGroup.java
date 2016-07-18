@@ -15,57 +15,38 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.flink.metrics.groups;
 
 import org.apache.flink.metrics.Counter;
-import org.apache.flink.metrics.MetricRegistry;
-
-import java.util.List;
 
 /**
- * Special {@link org.apache.flink.metrics.MetricGroup} that contains shareable pre-defined IO-related metrics.
+ * Metric group that contains shareable pre-defined IO-related metrics. The metrics registration is
+ * forwarded to the parent task metric group.
  */
-public class IOMetricGroup extends AbstractMetricGroup {
-	
-	private final TaskMetricGroup parent;
+public class IOMetricGroup extends ProxyMetricGroup<TaskMetricGroup> {
 
-	private final Counter numBytesIn;
 	private final Counter numBytesOut;
-	private final Counter numRecordsIn;
-	private final Counter numRecordsOut;
+	private final Counter numBytesInLocal;
+	private final Counter numBytesInRemote;
 
-	public IOMetricGroup(MetricRegistry registry, TaskMetricGroup parent) {
-		super(registry);
-		this.parent = parent;
-		this.numBytesIn = parent.counter("numBytesIn");
-		this.numBytesOut = parent.counter("numBytesOut");
-		this.numRecordsIn = parent.counter("numRecordsIn");
-		this.numRecordsOut = parent.counter("numRecordsOut");
-	}
+	public IOMetricGroup(TaskMetricGroup parent) {
+		super(parent);
 
-	@Override
-	public List<String> generateScope() {
-		return parent.generateScope();
-	}
-
-	@Override
-	public List<String> generateScope(Scope.ScopeFormat format) {
-		return parent.generateScope(format);
-	}
-
-	public Counter getBytesInCounter() {
-		return this.numBytesIn;
+		this.numBytesOut = counter("numBytesOut");
+		this.numBytesInLocal = counter("numBytesInLocal");
+		this.numBytesInRemote = counter("numBytesInRemote");
 	}
 
 	public Counter getBytesOutCounter() {
-		return this.numBytesOut;
+		return numBytesOut;
 	}
 
-	public Counter getRecordsInCounter() {
-		return this.numRecordsIn;
+	public Counter getNumBytesInLocalCounter() {
+		return numBytesInLocal;
 	}
 
-	public Counter getRecordsOutCounter() {
-		return this.numRecordsOut;
+	public Counter getNumBytesInRemoteCounter() {
+		return numBytesInRemote;
 	}
 }

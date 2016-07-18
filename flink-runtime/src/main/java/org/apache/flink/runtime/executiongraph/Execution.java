@@ -66,7 +66,6 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 import static akka.dispatch.Futures.future;
-import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.flink.runtime.execution.ExecutionState.CANCELED;
 import static org.apache.flink.runtime.execution.ExecutionState.CANCELING;
 import static org.apache.flink.runtime.execution.ExecutionState.CREATED;
@@ -82,6 +81,7 @@ import static org.apache.flink.runtime.messages.TaskMessages.SubmitTask;
 import static org.apache.flink.runtime.messages.TaskMessages.UpdatePartitionInfo;
 import static org.apache.flink.runtime.messages.TaskMessages.UpdateTaskSinglePartitionInfo;
 import static org.apache.flink.runtime.messages.TaskMessages.createUpdateTaskMultiplePartitionInfos;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * A single execution of a vertex. While an {@link ExecutionVertex} can be executed multiple times (for recovery,
@@ -139,8 +139,6 @@ public class Execution implements Serializable {
 	private SerializedValue<StateHandle<?>> operatorState;
 
 	private Map<Integer, SerializedValue<StateHandle<?>>> operatorKvState;
-	
-	private long recoveryTimestamp;
 
 	/** The execution context which is used to execute futures. */
 	@SuppressWarnings("NonSerializableFieldInSerializableClass")
@@ -239,15 +237,13 @@ public class Execution implements Serializable {
 
 	public void setInitialState(
 		SerializedValue<StateHandle<?>> initialState,
-		Map<Integer, SerializedValue<StateHandle<?>>> initialKvState,
-		long recoveryTimestamp) {
+		Map<Integer, SerializedValue<StateHandle<?>>> initialKvState) {
 
 		if (state != ExecutionState.CREATED) {
 			throw new IllegalArgumentException("Can only assign operator state when execution attempt is in CREATED");
 		}
 		this.operatorState = initialState;
 		this.operatorKvState = initialKvState;
-		this.recoveryTimestamp = recoveryTimestamp;
 	}
 
 	// --------------------------------------------------------------------------------------------
@@ -376,7 +372,6 @@ public class Execution implements Serializable {
 				slot,
 				operatorState,
 				operatorKvState,
-				recoveryTimestamp,
 				attemptNumber);
 
 			// register this execution at the execution graph, to receive call backs
@@ -405,8 +400,8 @@ public class Execution implements Serializable {
 					}
 					else {
 						if (!(success.equals(Messages.getAcknowledge()))) {
-							markFailed(new Exception("Failed to deploy the task to slot " + slot +
-									": Response was not of type Acknowledge"));
+							markFailed(new Exception("Failed to deploy the task to slot. Response was not of type 'Acknowledge', but was " + success
+									+ "\nSlot Details: " + slot));
 						}
 					}
 				}

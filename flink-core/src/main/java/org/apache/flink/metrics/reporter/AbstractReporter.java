@@ -18,33 +18,61 @@
 
 package org.apache.flink.metrics.reporter;
 
+import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.metrics.CharacterFilter;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Metric;
+import org.apache.flink.metrics.groups.AbstractMetricGroup;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import java.util.HashMap;
 import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 
-public abstract class AbstractReporter implements MetricReporter {
-	
-	protected Map<String, Gauge<?>> gauges = new ConcurrentHashMap<>();
-	protected Map<String, Counter> counters = new ConcurrentHashMap<>();
+/**
+ * Base interface for custom metric reporters.
+ */
+@PublicEvolving
+public abstract class AbstractReporter implements MetricReporter, CharacterFilter {
+	protected final Logger log = LoggerFactory.getLogger(getClass());
+
+	protected final Map<Gauge<?>, String> gauges = new HashMap<>();
+	protected final Map<Counter, String> counters = new HashMap<>();
+	protected final Map<Histogram, String> histograms = new HashMap<>();
 
 	@Override
-	public void notifyOfAddedMetric(Metric metric, String name) {
-		if (metric instanceof Counter) {
-			counters.put(name, (Counter) metric);
-		} else if (metric instanceof Gauge) {
-			gauges.put(name, (Gauge<?>) metric);
+	public void notifyOfAddedMetric(Metric metric, String metricName, AbstractMetricGroup group) {
+		final String name = group.getMetricIdentifier(metricName, this);
+
+		synchronized (this) {
+			if (metric instanceof Counter) {
+				counters.put((Counter) metric, name);
+			} else if (metric instanceof Gauge) {
+				gauges.put((Gauge<?>) metric, name);
+			} else if (metric instanceof Histogram) {
+				histograms.put((Histogram) metric, name);
+			} else {
+				log.warn("Cannot add unknown metric type {}. This indicates that the reporter " +
+					"does not support this metric type.", metric.getClass().getName());
+			}
 		}
 	}
 
 	@Override
-	public void notifyOfRemovedMetric(Metric metric, String name) {
-		if (metric instanceof Counter) {
-			counters.remove(name);
-		} else if (metric instanceof Gauge) {
-			gauges.remove(name);
+	public void notifyOfRemovedMetric(Metric metric, String metricName, AbstractMetricGroup group) {
+		synchronized (this) {
+			if (metric instanceof Counter) {
+				counters.remove(metric);
+			} else if (metric instanceof Gauge) {
+				gauges.remove(metric);
+			} else if (metric instanceof Histogram) {
+				histograms.remove(metric);
+			} else {
+				log.warn("Cannot remove unknown metric type {}. This indicates that the reporter " +
+					"does not support this metric type.", metric.getClass().getName());
+			}
 		}
 	}
 }

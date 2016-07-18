@@ -32,10 +32,9 @@ import org.apache.flink.api.java.tuple.Tuple;
 import org.apache.flink.api.java.tuple.Tuple1;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.UnmodifiableConfiguration;
-import org.apache.flink.metrics.util.DummyMetricGroup;
-import org.apache.flink.metrics.util.DummyTaskMetricGroup;
+import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.execution.Environment;
-import org.apache.flink.runtime.taskmanager.RuntimeEnvironment;
+import org.apache.flink.runtime.operators.testutils.UnregisteredTaskMetricsGroup;
 import org.apache.flink.storm.util.AbstractTest;
 import org.apache.flink.storm.util.SplitStreamType;
 import org.apache.flink.storm.util.StormConfig;
@@ -50,6 +49,7 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.junit.runner.RunWith;
 import org.powermock.api.mockito.PowerMockito;
+import org.powermock.core.classloader.annotations.PowerMockIgnore;
 import org.powermock.core.classloader.annotations.PrepareForTest;
 import org.powermock.modules.junit4.PowerMockRunner;
 
@@ -68,6 +68,7 @@ import static org.mockito.Mockito.when;
 
 @RunWith(PowerMockRunner.class)
 @PrepareForTest({StreamRecordSerializer.class, WrapperSetupHelper.class, StreamRecord.class})
+@PowerMockIgnore({"javax.management.*", "com.sun.jndi.*"})
 public class BoltWrapperTest extends AbstractTest {
 
 	@Test(expected = IllegalArgumentException.class)
@@ -144,7 +145,7 @@ public class BoltWrapperTest extends AbstractTest {
 		final StreamingRuntimeContext taskContext = mock(StreamingRuntimeContext.class);
 		when(taskContext.getExecutionConfig()).thenReturn(mock(ExecutionConfig.class));
 		when(taskContext.getTaskName()).thenReturn("name");
-		when(taskContext.getMetricGroup()).thenReturn(new DummyMetricGroup());
+		when(taskContext.getMetricGroup()).thenReturn(new UnregisteredMetricsGroup());
 
 		final IRichBolt bolt = mock(IRichBolt.class);
 
@@ -229,7 +230,7 @@ public class BoltWrapperTest extends AbstractTest {
 		final StreamingRuntimeContext taskContext = mock(StreamingRuntimeContext.class);
 		when(taskContext.getExecutionConfig()).thenReturn(taskConfig);
 		when(taskContext.getTaskName()).thenReturn("name");
-		when(taskContext.getMetricGroup()).thenReturn(new DummyMetricGroup());
+		when(taskContext.getMetricGroup()).thenReturn(new UnregisteredMetricsGroup());
 
 		final SetupOutputFieldsDeclarer declarer = new SetupOutputFieldsDeclarer();
 		declarer.declare(new Fields("dummy"));
@@ -294,7 +295,7 @@ public class BoltWrapperTest extends AbstractTest {
 		final StreamingRuntimeContext taskContext = mock(StreamingRuntimeContext.class);
 		when(taskContext.getExecutionConfig()).thenReturn(taskConfig);
 		when(taskContext.getTaskName()).thenReturn("name");
-		when(taskContext.getMetricGroup()).thenReturn(new DummyMetricGroup());
+		when(taskContext.getMetricGroup()).thenReturn(new UnregisteredMetricsGroup());
 
 		final IRichBolt bolt = mock(IRichBolt.class);
 		BoltWrapper<Object, Object> wrapper = new BoltWrapper<Object, Object>(bolt);
@@ -367,7 +368,7 @@ public class BoltWrapperTest extends AbstractTest {
 		Environment env = mock(Environment.class);
 		when(env.getTaskInfo()).thenReturn(new TaskInfo("Mock Task", 0, 1, 0));
 		when(env.getUserClassLoader()).thenReturn(BoltWrapperTest.class.getClassLoader());
-		when(env.getMetricGroup()).thenReturn(new DummyTaskMetricGroup());
+		when(env.getMetricGroup()).thenReturn(new UnregisteredTaskMetricsGroup());
 
 		StreamTask<?, ?> mockTask = mock(StreamTask.class);
 		when(mockTask.getCheckpointLock()).thenReturn(new Object());

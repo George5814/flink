@@ -28,6 +28,7 @@ import org.apache.flink.api.java.io.CsvOutputFormat;
 import org.apache.flink.api.java.utils.DataSetUtils;
 import org.apache.flink.api.java.utils.ParameterTool;
 import org.apache.flink.graph.Graph;
+import org.apache.flink.graph.asm.simple.undirected.Simplify;
 import org.apache.flink.graph.asm.translate.LongValueToIntValue;
 import org.apache.flink.graph.asm.translate.TranslateGraphIds;
 import org.apache.flink.graph.generator.RMatGraph;
@@ -96,10 +97,10 @@ public class JaccardIndex {
 
 				Graph<LongValue, NullValue, NullValue> graph = Graph
 					.fromCsvReader(parameters.get("input_filename"), env)
-					.ignoreCommentsEdges("#")
-					.lineDelimiterEdges(lineDelimiter)
-					.fieldDelimiterEdges(fieldDelimiter)
-					.keyType(LongValue.class);
+						.ignoreCommentsEdges("#")
+						.lineDelimiterEdges(lineDelimiter)
+						.fieldDelimiterEdges(fieldDelimiter)
+						.keyType(LongValue.class);
 
 				ji = graph
 					.run(new org.apache.flink.graph.library.similarity.JaccardIndex<LongValue, NullValue, NullValue>());
@@ -118,15 +119,16 @@ public class JaccardIndex {
 				boolean clipAndFlip = parameters.getBoolean("clip_and_flip", DEFAULT_CLIP_AND_FLIP);
 
 				Graph<LongValue, NullValue, NullValue> graph = new RMatGraph<>(env, rnd, vertexCount, edgeCount)
-					.setSimpleGraph(true, clipAndFlip)
 					.generate();
 
 				if (scale > 32) {
 					ji = graph
+						.run(new Simplify<LongValue, NullValue, NullValue>(clipAndFlip))
 						.run(new org.apache.flink.graph.library.similarity.JaccardIndex<LongValue, NullValue, NullValue>());
 				} else {
 					ji = graph
 						.run(new TranslateGraphIds<LongValue, IntValue, NullValue, NullValue>(new LongValueToIntValue()))
+						.run(new Simplify<IntValue, NullValue, NullValue>(clipAndFlip))
 						.run(new org.apache.flink.graph.library.similarity.JaccardIndex<IntValue, NullValue, NullValue>());
 				}
 				} break;
@@ -161,6 +163,7 @@ public class JaccardIndex {
 
 				env.execute();
 				break;
+
 			default:
 				printUsage();
 				return;

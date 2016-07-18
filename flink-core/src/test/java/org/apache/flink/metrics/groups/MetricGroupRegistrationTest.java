@@ -17,9 +17,12 @@
  */
 package org.apache.flink.metrics.groups;
 
+import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
+import org.apache.flink.metrics.HistogramStatistics;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.MetricRegistry;
@@ -37,9 +40,11 @@ public class MetricGroupRegistrationTest {
 	@Test
 	public void testMetricInstantiation() {
 		Configuration config = new Configuration();
-		config.setString(MetricRegistry.KEY_METRICS_REPORTER_CLASS, TestReporter1.class.getName());
+		config.setString(ConfigConstants.METRICS_REPORTER_CLASS, TestReporter1.class.getName());
 
-		MetricGroup root = new TaskManagerMetricGroup(new MetricRegistry(config), "host", "id");
+		MetricRegistry registry = new MetricRegistry(config);
+
+		MetricGroup root = new TaskManagerMetricGroup(registry, "host", "id");
 
 		Counter counter = root.counter("counter");
 		assertEquals(counter, TestReporter1.lastPassedMetric);
@@ -54,6 +59,27 @@ public class MetricGroupRegistrationTest {
 		
 		Assert.assertEquals(gauge, TestReporter1.lastPassedMetric);
 		assertEquals("gauge", TestReporter1.lastPassedName);
+
+		Histogram histogram = root.histogram("histogram", new Histogram() {
+			@Override
+			public void update(long value) {
+
+			}
+
+			@Override
+			public long getCount() {
+				return 0;
+			}
+
+			@Override
+			public HistogramStatistics getStatistics() {
+				return null;
+			}
+		});
+
+		Assert.assertEquals(histogram, TestReporter1.lastPassedMetric);
+		assertEquals("histogram", TestReporter1.lastPassedName);
+		registry.shutdown();
 	}
 
 	public static class TestReporter1 extends TestReporter {
@@ -62,24 +88,10 @@ public class MetricGroupRegistrationTest {
 		public static String lastPassedName;
 
 		@Override
-		public void notifyOfAddedMetric(Metric metric, String name) {
+		public void notifyOfAddedMetric(Metric metric, String metricName, AbstractMetricGroup group) {
 			lastPassedMetric = metric;
-			lastPassedName = name;
+			lastPassedName = metricName;
 		}
-
-		@Override
-		public void notifyOfRemovedMetric(Metric metric, String name) {}
-	}
-
-	/**
-	 * Verifies that metric names containing special characters are rejected.
-	 */
-	@Test(expected = IllegalArgumentException.class)
-	public void testInvalidMetricName() {
-		Configuration config = new Configuration();
-
-		MetricGroup root = new TaskManagerMetricGroup(new MetricRegistry(config), "host", "id");
-		root.counter("=)(/!");
 	}
 
 	/**
@@ -89,7 +101,9 @@ public class MetricGroupRegistrationTest {
 	public void testDuplicateGroupName() {
 		Configuration config = new Configuration();
 
-		MetricGroup root = new TaskManagerMetricGroup(new MetricRegistry(config), "host", "id");
+		MetricRegistry registry = new MetricRegistry(config);
+
+		MetricGroup root = new TaskManagerMetricGroup(registry, "host", "id");
 
 		MetricGroup group1 = root.addGroup("group");
 		MetricGroup group2 = root.addGroup("group");

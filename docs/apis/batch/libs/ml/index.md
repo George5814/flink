@@ -49,6 +49,10 @@ FlinkML currently supports the following algorithms:
 * [Multiple linear regression](multiple_linear_regression.html)
 * [Optimization Framework](optimization.html)
 
+### Unsupervised Learning
+
+* [k-Nearest neighbors join](knn.html)
+
 ### Data Preprocessing
 
 * [Polynomial Features](polynomial_features.html)
@@ -62,6 +66,7 @@ FlinkML currently supports the following algorithms:
 ### Utilities
 
 * [Distance Metrics](distance_metrics.html)
+* [Cross Validation](cross_validation.html)
 
 ## Getting Started
 
@@ -86,9 +91,17 @@ Now you can start solving your analysis task.
 The following code snippet shows how easy it is to train a multiple linear regression model.
 
 {% highlight scala %}
+
+
 // LabeledVector is a feature vector with a label (class or real value)
 val trainingData: DataSet[LabeledVector] = ...
 val testingData: DataSet[Vector] = ...
+
+// Alternatively, a Splitter is used to break up a DataSet into training and testing data.
+val dataSet: DataSet[LabeledVector] = ...
+val trainTestData: DataSet[TrainTestDataSet] = Splitter.trainTestSplit(dataSet)
+val trainingData: DataSet[LabeledVector] = trainTestData.training
+val testingData: DataSet[Vector] = trainTestData.testing.map(lv => lv.vector)
 
 val mlr = MultipleLinearRegression()
   .setStepsize(1.0)

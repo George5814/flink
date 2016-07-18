@@ -4,7 +4,7 @@ is_beta: true
 # Top-level navigation
 top-nav-group: apis
 top-nav-pos: 4
-top-nav-title: "Table API and SQL"
+top-nav-title: "<strong>Table API and SQL</strong>"
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -205,14 +205,58 @@ tableEnv.registerTableSource("Customers", custTS)
 
 A `TableSource` can provide access to data stored in various storage systems such as databases (MySQL, HBase, ...), file formats (CSV, Apache Parquet, Avro, ORC, ...), or messaging systems (Apache Kafka, RabbitMQ, ...).
 
-Currently, Flink only provides a `CsvTableSource` to read CSV files. A custom `TableSource` can be defined by implementing the `BatchTableSource` or `StreamTableSource` interface. 
+Currently, Flink provides the `CsvTableSource` to read CSV files and the `Kafka08JsonTableSource`/`Kafka09JsonTableSource` to read JSON objects from Kafka. 
+A custom `TableSource` can be defined by implementing the `BatchTableSource` or `StreamTableSource` interface.
 
+### Available Table Sources
+
+| **Class name** | **Maven dependency** | **Batch?** | **Streaming?** | **Description**
+| `CsvTableSouce` | `flink-table` | Y | Y | A simple source for CSV files with up to 25 fields.
+| `Kafka08JsonTableSource` | `flink-connector-kafka-0.8` | N | Y | A Kafka 0.8 source for JSON data.
+| `Kafka09JsonTableSource` | `flink-connector-kafka-0.9` | N | Y | A Kafka 0.9 source for JSON data.
+
+All sources that come with the `flink-table` dependency can be directly used by your Table programs. For all other table sources, you have to add the respective dependency in addition to the `flink-table` dependency.
+
+#### KafkaJsonTableSource
+
+To use the Kafka JSON source, you have to add the Kafka connector dependency to your project:
+
+  - `flink-connector-kafka-0.8` for Kafka 0.8, and
+  - `flink-connector-kafka-0.9` for Kafka 0.9, respectively.
+
+You can then create the source as follows (example for Kafka 0.8):
+
+```java
+// The JSON field names and types
+String[] fieldNames =  new String[] { "id", "name", "score"};
+Class<?>[] fieldTypes = new Class<?>[] { Integer.class, String.class, Double.class };
+
+KafkaJsonTableSource kafkaTableSource = new Kafka08JsonTableSource(
+    kafkaTopic,
+    kafkaProperties,
+    fieldNames,
+    fieldTypes);
+```
+
+By default, a missing JSON field does not fail the source. You can configure this via:
+
+```java
+// Fail on missing JSON field
+tableSource.setFailOnMissingField(true);
+```
+
+You can work with the Table as explained in the rest of the Table API guide:
+
+```java
+tableEnvironment.registerTableSource("kafka-source", kafkaTableSource);
+Table result = tableEnvironment.ingest("kafka-source");
+```
 
 Table API
 ----------
 The Table API provides methods to apply relational operations on DataSets and Datastreams both in Scala and Java.
 
-The central concept of the Table API is a `Table` which represents a table with relational schema (or relation). Tables can be created from a `DataSet` or `DataStream`, converted into a `DataSet` or `DataStream`, or registered in a table catalog using a `TableEnvironment`. A `Table` is always bound to a specific `TableEnvironment`. It is not possible to combine Tables of different TableEnvironments. 
+The central concept of the Table API is a `Table` which represents a table with relational schema (or relation). Tables can be created from a `DataSet` or `DataStream`, converted into a `DataSet` or `DataStream`, or registered in a table catalog using a `TableEnvironment`. A `Table` is always bound to a specific `TableEnvironment`. It is not possible to combine Tables of different TableEnvironments.
 
 *Note: The only operations currently supported on streaming Tables are selection, projection, and union.*
 
@@ -222,7 +266,7 @@ When using Flink's Java DataSet API, DataSets are converted to Tables and Tables
 The following example shows:
 
 - how a `DataSet` is converted to a `Table`,
-- how relational queries are specified, and 
+- how relational queries are specified, and
 - how a `Table` is converted back to a `DataSet`.
 
 {% highlight java %}
@@ -278,7 +322,7 @@ The Table API is enabled by importing `org.apache.flink.api.scala.table._`. This
 implicit conversions to convert a `DataSet` or `DataStream` to a Table. The following example shows:
 
 - how a `DataSet` is converted to a `Table`,
-- how relational queries are specified, and 
+- how relational queries are specified, and
 - how a `Table` is converted back to a `DataSet`.
 
 {% highlight scala %}
@@ -423,7 +467,7 @@ Table result = in.groupBy("a").select("a, b.sum as d");
     <tr>
       <td><strong>Join</strong></td>
       <td>
-        <p>Similar to a SQL JOIN clause. Joins two tables. Both tables must have distinct field names and an equality join predicate must be defined using a where or filter operator.</p>
+        <p>Similar to a SQL JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined through join operator or using a where or filter operator.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "d, e, f");
@@ -433,13 +477,109 @@ Table result = left.join(right).where("a = d").select("a, b, e");
     </tr>
 
     <tr>
+      <td><strong>LeftOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL LEFT OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "d, e, f");
+Table result = left.leftOuterJoin(right, "a = d").select("a, b, e");
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>RightOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL RIGHT OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "d, e, f");
+Table result = left.rightOuterJoin(right, "a = d").select("a, b, e");
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>FullOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL FULL OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "d, e, f");
+Table result = left.fullOuterJoin(right, "a = d").select("a, b, e");
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
       <td><strong>Union</strong></td>
+      <td>
+        <p>Similar to a SQL UNION clause. Unions two tables with duplicate records removed. Both tables must have identical schema, i.e., field names and types.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "a, b, c");
+Table result = left.union(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>UnionAll</strong></td>
       <td>
         <p>Similar to a SQL UNION ALL clause. Unions two tables. Both tables must have identical schema, i.e., field names and types.</p>
 {% highlight java %}
 Table left = tableEnv.fromDataSet(ds1, "a, b, c");
 Table right = tableEnv.fromDataSet(ds2, "a, b, c");
 Table result = left.unionAll(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>Intersect</strong></td>
+      <td>
+        <p>Similar to a SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "d, e, f");
+Table result = left.intersect(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>IntersectAll</strong></td>
+      <td>
+        <p>Similar to a SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "d, e, f");
+Table result = left.intersectAll(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>Minus</strong></td>
+      <td>
+        <p>Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "a, b, c");
+Table result = left.minus(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>MinusAll</strong></td>
+      <td>
+        <p>Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
+{% highlight java %}
+Table left = tableEnv.fromDataSet(ds1, "a, b, c");
+Table right = tableEnv.fromDataSet(ds2, "a, b, c");
+Table result = left.minusAll(right);
 {% endhighlight %}
       </td>
     </tr>
@@ -544,13 +684,109 @@ val result = left.join(right).where('a === 'd).select('a, 'b, 'e);
     </tr>
 
     <tr>
+      <td><strong>LeftOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL LEFT OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight scala %}
+val left = tableEnv.fromDataSet(ds1, 'a, 'b, 'c)
+val right = tableEnv.fromDataSet(ds2, 'd, 'e, 'f)
+val result = left.leftOuterJoin(right, 'a === 'd).select('a, 'b, 'e)
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>RightOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL RIGHT OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight scala %}
+val left = tableEnv.fromDataSet(ds1, 'a, 'b, 'c)
+val right = tableEnv.fromDataSet(ds2, 'd, 'e, 'f)
+val result = left.rightOuterJoin(right, 'a === 'd).select('a, 'b, 'e)
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>FullOuterJoin</strong></td>
+      <td>
+        <p>Similar to a SQL FULL OUTER JOIN clause. Joins two tables. Both tables must have distinct field names and at least one equality join predicate must be defined.</p>
+{% highlight scala %}
+val left = tableEnv.fromDataSet(ds1, 'a, 'b, 'c)
+val right = tableEnv.fromDataSet(ds2, 'd, 'e, 'f)
+val result = left.fullOuterJoin(right, 'a === 'd).select('a, 'b, 'e)
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
       <td><strong>Union</strong></td>
+      <td>
+        <p>Similar to a SQL UNION clause. Unions two tables with duplicate records removed, both tables must have identical schema(field names and types).</p>
+{% highlight scala %}
+val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
+val right = ds2.toTable(tableEnv, 'a, 'b, 'c);
+val result = left.union(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>UnionAll</strong></td>
       <td>
         <p>Similar to a SQL UNION ALL clause. Unions two tables, both tables must have identical schema(field names and types).</p>
 {% highlight scala %}
 val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
 val right = ds2.toTable(tableEnv, 'a, 'b, 'c);
 val result = left.unionAll(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>Intersect</strong></td>
+      <td>
+        <p>Similar to a SQL INTERSECT clause. Intersect returns records that exist in both tables. If a record is present in one or both tables more than once, it is returned just once, i.e., the resulting table has no duplicate records. Both tables must have identical field types.</p>
+{% highlight scala %}
+val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
+val right = ds2.toTable(tableEnv, 'e, 'f, 'g);
+val result = left.intersect(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>IntersectAll</strong></td>
+      <td>
+        <p>Similar to a SQL INTERSECT ALL clause. IntersectAll returns records that exist in both tables. If a record is present in both tables more than once, it is returned as many times as it is present in both tables, i.e., the resulting table might have duplicate records. Both tables must have identical field types.</p>
+{% highlight scala %}
+val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
+val right = ds2.toTable(tableEnv, 'e, 'f, 'g);
+val result = left.intersectAll(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>Minus</strong></td>
+      <td>
+        <p>Similar to a SQL EXCEPT clause. Minus returns records from the left table that do not exist in the right table. Duplicate records in the left table are returned exactly once, i.e., duplicates are removed. Both tables must have identical field types.</p>
+{% highlight scala %}
+val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
+val right = ds2.toTable(tableEnv, 'a, 'b, 'c);
+val result = left.minus(right);
+{% endhighlight %}
+      </td>
+    </tr>
+
+    <tr>
+      <td><strong>MinusAll</strong></td>
+      <td>
+        <p>Similar to a SQL EXCEPT ALL clause. MinusAll returns the records that do not exist in the right table. A record that is present n times in the left table and m times in the right table is returned (n - m) times, i.e., as many duplicates as are present in the right table are removed. Both tables must have identical field types.</p>
+{% highlight scala %}
+val left = ds1.toTable(tableEnv, 'a, 'b, 'c);
+val right = ds2.toTable(tableEnv, 'a, 'b, 'c);
+val result = left.minusAll(right);
 {% endhighlight %}
       </td>
     </tr>
@@ -609,11 +845,11 @@ unary = [ "!" | "-" ] , composite ;
 
 composite = suffixed | atom ;
 
-suffixed = cast | as | aggregation | nullCheck | evaluate | functionCall ;
+suffixed = cast | as | aggregation | nullCheck | if | functionCall ;
 
 cast = composite , ".cast(" , dataType , ")" ;
 
-dataType = "BYTE" | "SHORT" | "INT" | "LONG" | "FLOAT" | "DOUBLE" | "BOOL" | "BOOLEAN" | "STRING" | "DATE" ;
+dataType = "BYTE" | "SHORT" | "INT" | "LONG" | "FLOAT" | "DOUBLE" | "BOOL" | "BOOLEAN" | "STRING" | "DECIMAL" | "DATE" | "TIME" | "TIMESTAMP";
 
 as = composite , ".as(" , fieldReference , ")" ;
 
@@ -621,7 +857,7 @@ aggregation = composite , ( ".sum" | ".min" | ".max" | ".count" | ".avg" ) , [ "
 
 nullCheck = composite , ( ".isNull" | ".isNotNull" ) , [ "()" ] ;
 
-evaluate = composite , ".eval(" , expression , "," , expression , ")" ;
+if = composite , ".?(" , expression , "," , expression , ")" ;
 
 functionCall = composite , "." , functionIdentifier , "(" , [ expression , { "," , expression } ] , ")"
 
@@ -632,7 +868,11 @@ nullLiteral = "Null(" , dataType , ")" ;
 {% endhighlight %}
 
 Here, `literal` is a valid Java literal, `fieldReference` specifies a column in the data, and `functionIdentifier` specifies a supported scalar function. The
-column names and function names follow Java identifier syntax. Expressions specified as Strings can also use prefix notation instead of suffix notation to call operators and functions. 
+column names and function names follow Java identifier syntax. Expressions specified as Strings can also use prefix notation instead of suffix notation to call operators and functions.
+
+If working with exact numeric values or large decimals is required, the Table API also supports Java's BigDecimal type. In the Scala Table API decimals can be defined by `BigDecimal("123456")` and in Java by appending a "p" for precise e.g. `123456p`.
+
+In order to work with temporal values the Table API supports Java SQL's Date, Time, and Timestamp types. In the Scala Table API literals can be defined by using `java.sql.Date.valueOf("2016-06-27")`, `java.sql.Time.valueOf("10:10:42")`, or `java.sql.Timestamp.valueOf("2016-06-27 10:10:42.123")`. The Java and Scala Table API also support calling `"2016-06-27".toDate()`, `"10:10:42".toTime()`, and `"2016-06-27 10:10:42.123".toTimestamp()` for converting Strings into temporal types. *Note:* Since Java's temporal SQL types are time zone dependent, please make sure that the Flink Client and all TaskManagers use the same time zone.
 
 {% top %}
 
@@ -641,7 +881,7 @@ SQL
 ----
 SQL queries are specified using the `sql()` method of the `TableEnvironment`. The method returns the result of the SQL query as a `Table` which can be converted into a `DataSet` or `DataStream`, used in subsequent Table API queries, or written to a `TableSink` (see [Writing Tables to External Sinks](#writing-tables-to-external-sinks)). SQL and Table API queries can seamlessly mixed and are holistically optimized and translated into a single DataStream or DataSet program.
 
-A `Table`, `DataSet`, `DataStream`, or external `TableSource` must be registered in the `TableEnvironment` in order to be accessible by a SQL query (see [Registering Tables](#registering-tables)). 
+A `Table`, `DataSet`, `DataStream`, or external `TableSource` must be registered in the `TableEnvironment` in order to be accessible by a SQL query (see [Registering Tables](#registering-tables)).
 
 *Note: Flink's SQL support is not feature complete, yet. Queries that include unsupported SQL features will cause a `TableException`. The limitations of SQL on batch and streaming tables are listed in the following sections.*
 
@@ -685,15 +925,15 @@ The current version supports selection (filter), projection, inner equi-joins, g
 
 Among others, the following SQL features are not supported, yet:
 
-- Time data types (`DATE`, `TIME`, `TIMESTAMP`, `INTERVAL`) and `DECIMAL` types
+- Time interval data type (`INTERVAL`)
+- Timestamps are limited to milliseconds precision
+- Advanced types such as generic types, composite types (e.g. POJOs), and arrays within rows
 - Distinct aggregates (e.g., `COUNT(DISTINCT name)`)
-- Outer joins
 - Non-equi joins and Cartesian products
 - Result selection by order position (`ORDER BY OFFSET FETCH`)
 - Grouping sets
-- Set operations except `UNION ALL` (`INTERSECT`, `UNION`, `EXCEPT`) 
 
-*Note: Tables are joined in the order in which they are specified in the `FROM` clause. In some cases the table order must be manually tweaked to resolve Cartesian products. Certain rewrites during optimization (e.g., subquery decorrelation) can result in unsupported operations such as outer joins.* 
+*Note: Tables are joined in the order in which they are specified in the `FROM` clause. In some cases the table order must be manually tweaked to resolve Cartesian products.*
 
 ### SQL on Streaming Tables
 
@@ -740,9 +980,9 @@ The current version of streaming SQL only supports `SELECT`, `FROM`, `WHERE`, an
 Writing Tables to External Sinks
 ----
 
-A `Table` can be written to a `TableSink`, which is a generic interface to support a wide variety of file formats (e.g. CSV, Apache Parquet, Apache Avro), storage systems (e.g., JDBC, Apache HBase, Apache Cassandra, Elasticsearch), or messaging systems (e.g., Apache Kafka, RabbitMQ). A batch `Table` can only be written to a `BatchTableSink`, a streaming table requires a `StreamTableSink`. A `TableSink` can implement both interfaces at the same time. 
+A `Table` can be written to a `TableSink`, which is a generic interface to support a wide variety of file formats (e.g. CSV, Apache Parquet, Apache Avro), storage systems (e.g., JDBC, Apache HBase, Apache Cassandra, Elasticsearch), or messaging systems (e.g., Apache Kafka, RabbitMQ). A batch `Table` can only be written to a `BatchTableSink`, a streaming table requires a `StreamTableSink`. A `TableSink` can implement both interfaces at the same time.
 
-Currently, Flink only provides a `CsvTableSink` that writes a batch or streaming `Table` to CSV-formatted files. A custom `TableSink` can be defined by implementing the `BatchTableSink` and/or `StreamTableSink` interface. 
+Currently, Flink only provides a `CsvTableSink` that writes a batch or streaming `Table` to CSV-formatted files. A custom `TableSink` can be defined by implementing the `BatchTableSink` and/or `StreamTableSink` interface.
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -751,7 +991,7 @@ ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 BatchTableEnvironment tableEnv = TableEnvironment.getTableEnvironment(env);
 
 // compute the result Table using Table API operators and/or SQL queries
-Table result = ... 
+Table result = ...
 
 // create a TableSink
 TableSink sink = new CsvTableSink("/path/to/file", fieldDelim = "|");
@@ -769,7 +1009,7 @@ val env = ExecutionEnvironment.getExecutionEnvironment
 val tableEnv = TableEnvironment.getTableEnvironment(env)
 
 // compute the result Table using Table API operators and/or SQL queries
-val result: Table = ... 
+val result: Table = ...
 
 // create a TableSink
 val sink: TableSink = new CsvTableSink("/path/to/file", fieldDelim = "|")

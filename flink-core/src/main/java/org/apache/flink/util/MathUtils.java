@@ -37,13 +37,8 @@ public final class MathUtils {
 		if (value == 0) {
 			throw new ArithmeticException("Logarithm of zero is undefined.");
 		}
-		
-		int log = 0;
-		while ((value = value >>> 1) != 0) {
-			log++;
-		}
-		
-		return log;
+
+		return 31 - Integer.numberOfLeadingZeros(value);
 	}
 	
 	/**
@@ -62,13 +57,7 @@ public final class MathUtils {
 		if ((value & (value - 1)) != 0) {
 			throw new IllegalArgumentException("The given value " + value + " is not a power of two.");
 		}
-		
-		int log = 0;
-		while ((value = value >>> 1) != 0) {
-			log++;
-		}
-		
-		return log;
+		return 31 - Integer.numberOfLeadingZeros(value);
 	}
 	
 	/**
@@ -76,7 +65,7 @@ public final class MathUtils {
 	 * power of two, it remains unchanged.
 	 * 
 	 * @param value The value to round down.
-	 * @return The closest value that is a power of to and less or equal than the given value.
+	 * @return The closest value that is a power of two and less or equal than the given value.
 	 */
 	public static int roundDownToPowerOf2(int value) {
 		return Integer.highestOneBit(value);
@@ -146,7 +135,10 @@ public final class MathUtils {
 		code *= 0x1b873593;
 
 		code = Integer.rotateLeft(code, 13);
-		code = code * 5 + 0xe6546b64;
+		// By the MurmurHash algorithm the following should be "code = code * 5 + 0xe6546b64;" (see FLINK-3623)
+		// but correcting the algorithm is a breaking change (see FLINK-4154). The effect of the resulting skew
+		// increases with increased parallelism (see FLINK-4154).
+		code *= 0xe6546b64;
 
 		code ^= 4;
 		code ^= code >>> 16;

@@ -213,7 +213,7 @@ val naturalNumbers = intNumbers.filter { _ > 0 }
 **IMPORTANT:** The system assumes that the function does not modify the elements on which the predicate is applied. Violating this assumption
 can lead to incorrect results.
 
-### Project (Tuple DataSets only) (Java/Python API Only)
+### Projection of Tuple DataSet
 
 The Project transformation removes or moves Tuple fields of a Tuple DataSet.
 The `project(int...)` method selects Tuple fields that should be retained by their index and defines their order in the output Tuple.
@@ -244,6 +244,13 @@ This problem can be overcome by hinting the return type of `project` operator li
 
 ~~~java
 DataSet<Tuple1<String>> ds2 = ds.<Tuple1<String>>project(0).distinct(0);
+~~~
+
+</div>
+<div data-lang="scala" markdown="1">
+
+~~~scala
+Not supported.
 ~~~
 
 </div>
@@ -777,11 +784,15 @@ DataSet<Tuple2<String, Integer>> combinedWords = input
   .combineGroup(new GroupCombineFunction<String, Tuple2<String, Integer>() {
 
     public void combine(Iterable<String> words, Collector<Tuple2<String, Integer>>) { // combine
+        String key = null;
         int count = 0;
+
         for (String word : words) {
+            key = word;
             count++;
         }
-        out.collect(new Tuple2(word, count));
+        // emit tuple with word and count
+        out.collect(new Tuple2(key, count));
     }
 });
 
@@ -790,11 +801,15 @@ DataSet<Tuple2<String, Integer>> output = combinedWords
   .reduceGroup(new GroupReduceFunction() { // group reduce with full data exchange
 
     public void reduce(Iterable<Tuple2<String, Integer>>, Collector<Tuple2<String, Integer>>) {
+        String key = null;
         int count = 0;
+
         for (Tuple2<String, Integer> word : words) {
+            key = word;
             count++;
         }
-        out.collect(new Tuple2(word, count));
+        // emit tuple with word and count
+        out.collect(new Tuple2(key, count));
     }
 });
 ~~~
@@ -809,24 +824,37 @@ val combinedWords: DataSet[(String, Int)] = input
   .groupBy(0)
   .combineGroup {
     (words, out: Collector[(String, Int)]) =>
+        var key: String = null
         var count = 0
+
         for (word <- words) {
-            count++
+            key = word
+            count += 1
         }
-        out.collect(word, count)
+        out.collect((key, count))
 }
 
 val output: DataSet[(String, Int)] = combinedWords
   .groupBy(0)
   .reduceGroup {
     (words, out: Collector[(String, Int)]) =>
-        var count = 0
-        for ((word, Int) <- words) {
-            count++
+        var key: String = null
+        var sum = 0
+
+        for ((word, sum) <- words) {
+            key = word
+            sum += count
         }
-        out.collect(word, count)
+        out.collect((key, sum))
 }
 
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+
+~~~python
+Not supported.
 ~~~
 
 </div>
@@ -873,7 +901,10 @@ val output = input.groupBy(1).aggregate(SUM, 0).and(MIN, 2)
 <div data-lang="python" markdown="1">
 
 ~~~python
-Not supported.
+from flink.functions.Aggregation import Sum, Min
+
+input = # [...]
+output = input.group_by(1).aggregate(Sum, 0).and_agg(Min, 2)
 ~~~
 
 </div>
@@ -883,6 +914,42 @@ To apply multiple aggregations on a DataSet it is necessary to use the `.and()` 
 In contrast to that `.aggregate(SUM, 0).aggregate(MIN, 2)` will apply an aggregation on an aggregation. In the given example it would produce the minimum of field 2 after calculating the sum of field 0 grouped by field 1.
 
 **Note:** The set of aggregation functions will be extended in the future.
+
+### MinBy / MaxBy on Grouped Tuple DataSet
+
+The MinBy (MaxBy) transformation selects a single tuple for each group of tuples. The selected tuple is the tuple whose values of one or more specified fields are minimum (maximum). The fields which are used for comparison must be valid key fields, i.e., comparable. If multiple tuples have minimum (maximum) fields values, an arbitrary tuple of these tuples is returned.
+
+The following code shows how to select the tuple with the minimum values for the `Integer` and `Double` fields for each group of tuples with the same `String` value from a `DataSet<Tuple3<Integer, String, Double>>`:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+
+~~~java
+DataSet<Tuple3<Integer, String, Double>> input = // [...]
+DataSet<Tuple3<Integer, String, Double>> output = input
+                                   .groupBy(1)   // group DataSet on second field
+                                   .minBy(0, 2); // select tuple with minimum values for first and third field.
+~~~
+
+</div>
+<div data-lang="scala" markdown="1">
+
+~~~scala
+val input: DataSet[(Int, String, Double)] = // [...]
+val output: DataSet[(Int, String, Double)] = input
+                                   .groupBy(1)  // group DataSet on second field
+                                   .minBy(0, 2) // select tuple with minimum values for first and third field.
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+
+~~~python
+Not supported.
+~~~
+
+</div>
+</div>
 
 ### Reduce on full DataSet
 
@@ -1010,13 +1077,50 @@ val output = input.aggregate(SUM, 0).and(MIN, 2)
 <div data-lang="python" markdown="1">
 
 ~~~python
-Not supported.
+from flink.functions.Aggregation import Sum, Min
+
+input = # [...]
+output = input.aggregate(Sum, 0).and_agg(Min, 2)
 ~~~
 
 </div>
 </div>
 
 **Note:** Extending the set of supported aggregation functions is on our roadmap.
+
+### MinBy / MaxBy on full Tuple DataSet
+
+The MinBy (MaxBy) transformation selects a single tuple from a DataSet of tuples. The selected tuple is the tuple whose values of one or more specified fields are minimum (maximum). The fields which are used for comparison must be valid key fields, i.e., comparable. If multiple tuples have minimum (maximum) fields values, an arbitrary tuple of these tuples is returned.
+
+The following code shows how to select the tuple with the maximum values for the `Integer` and `Double` fields from a `DataSet<Tuple3<Integer, String, Double>>`:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+
+~~~java
+DataSet<Tuple3<Integer, String, Double>> input = // [...]
+DataSet<Tuple3<Integer, String, Double>> output = input
+                                   .maxBy(0, 2); // select tuple with maximum values for first and third field.
+~~~
+
+</div>
+<div data-lang="scala" markdown="1">
+
+~~~scala
+val input: DataSet[(Int, String, Double)] = // [...]
+val output: DataSet[(Int, String, Double)] = input                          
+                                   .maxBy(0, 2) // select tuple with maximum values for first and third field.
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+
+~~~python
+Not supported.
+~~~
+
+</div>
+</div>
 
 ### Distinct
 
@@ -1348,9 +1452,34 @@ DataSet<Tuple2<String, Double>>
             ratings.join(weights) // [...]
 ~~~
 
+</div>
+<div data-lang="scala" markdown="1">
+
+~~~scala
+case class Rating(name: String, category: String, points: Int)
+
+val ratings: DataSet[Ratings] = // [...]
+val weights: DataSet[(String, Double)] = // [...]
+
+val weightedRatings = ratings.join(weights).where("category").equalTo(0) {
+  (rating, weight, out: Collector[(String, Double)]) =>
+    if (weight._2 > 0.1) out.collect(rating.name, rating.points * weight._2)
+}
+
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+Not supported.
+</div>
+</div>
+
 #### Join with Projection (Java/Python Only)
 
 A Join transformation can construct result tuples using a projection as shown here:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
 
 ~~~java
 DataSet<Tuple3<Integer, Byte, String>> input1 = // [...]
@@ -1373,24 +1502,11 @@ The join projection works also for non-Tuple DataSets. In this case, `projectFir
 <div data-lang="scala" markdown="1">
 
 ~~~scala
-case class Rating(name: String, category: String, points: Int)
-
-val ratings: DataSet[Ratings] = // [...]
-val weights: DataSet[(String, Double)] = // [...]
-
-val weightedRatings = ratings.join(weights).where("category").equalTo(0) {
-  (rating, weight, out: Collector[(String, Double)]) =>
-    if (weight._2 > 0.1) out.collect(rating.name, rating.points * weight._2)
-}
-
+Not supported.
 ~~~
 
 </div>
 <div data-lang="python" markdown="1">
-
-#### Join with Projection (Java/Python Only)
-
-A Join transformation can construct result tuples using a projection as shown here:
 
 ~~~python
  result = input1.join(input2).where(0).equal_to(0) \
@@ -1638,6 +1754,23 @@ DataSet<Tuple2<String, Integer>>
             moviesWithPoints =
             movies.leftOuterJoin(ratings) // [...]
 ~~~
+
+</div>
+<div data-lang="scala" markdown="1">
+
+~~~scala
+Not supported.
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+
+~~~python
+Not supported.
+~~~
+
+</div>
+</div>
 
 #### Join Algorithm Hints
 
@@ -2130,7 +2263,7 @@ DataSet<Tuple2<String, Integer>> in = // [...]
 // in descending order on the first String field.
 // Apply a MapPartition transformation on the sorted partitions.
 DataSet<Tuple2<String, String>> out = in.sortPartition(1, Order.ASCENDING)
-                                          .sortPartition(0, Order.DESCENDING)
+                                        .sortPartition(0, Order.DESCENDING)
                                         .mapPartition(new PartitionMapper());
 ~~~
 
@@ -2143,8 +2276,15 @@ val in: DataSet[(String, Int)] = // [...]
 // in descending order on the first String field.
 // Apply a MapPartition transformation on the sorted partitions.
 val out = in.sortPartition(1, Order.ASCENDING)
-              .sortPartition(0, Order.DESCENDING)
+            .sortPartition(0, Order.DESCENDING)
             .mapPartition { ... }
+~~~
+
+</div>
+<div data-lang="python" markdown="1">
+
+~~~python
+Not supported.
 ~~~
 
 </div>

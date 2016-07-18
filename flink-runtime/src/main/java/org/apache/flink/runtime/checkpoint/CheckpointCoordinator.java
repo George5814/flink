@@ -55,8 +55,8 @@ import java.util.Timer;
 import java.util.TimerTask;
 import java.util.UUID;
 
-import static com.google.common.base.Preconditions.checkArgument;
-import static com.google.common.base.Preconditions.checkNotNull;
+import static org.apache.flink.util.Preconditions.checkArgument;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 /**
  * The checkpoint coordinator coordinates the distributed snapshots of operators and state.
@@ -801,8 +801,6 @@ public class CheckpointCoordinator {
 				}
 			}
 
-			long recoveryTimestamp = System.currentTimeMillis();
-
 			for (Map.Entry<JobVertexID, TaskState> taskGroupStateEntry: latest.getTaskStates().entrySet()) {
 				TaskState taskState = taskGroupStateEntry.getValue();
 				ExecutionJobVertex executionJobVertex = tasks.get(taskGroupStateEntry.getKey());
@@ -833,7 +831,7 @@ public class CheckpointCoordinator {
 						Map<Integer, SerializedValue<StateHandle<?>>> kvStateForTaskMap = taskState.getUnwrappedKvStates(keyGroupPartitions.get(i));
 
 						Execution currentExecutionAttempt = executionJobVertex.getTaskVertices()[i].getCurrentExecutionAttempt();
-						currentExecutionAttempt.setInitialState(state, kvStateForTaskMap, recoveryTimestamp);
+						currentExecutionAttempt.setInitialState(state, kvStateForTaskMap);
 					}
 
 					if (allOrNothingState && counter > 0 && counter < executionJobVertex.getParallelism()) {

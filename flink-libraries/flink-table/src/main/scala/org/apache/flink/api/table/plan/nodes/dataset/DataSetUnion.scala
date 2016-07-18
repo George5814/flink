@@ -18,16 +18,16 @@
 
 package org.apache.flink.api.table.plan.nodes.dataset
 
-import org.apache.calcite.plan.{RelOptCost, RelOptPlanner, RelOptCluster, RelTraitSet}
+import org.apache.calcite.plan.{RelOptCluster, RelOptCost, RelOptPlanner, RelTraitSet}
 import org.apache.calcite.rel.`type`.RelDataType
 import org.apache.calcite.rel.metadata.RelMetadataQuery
-import org.apache.calcite.rel.{RelWriter, BiRel, RelNode}
+import org.apache.calcite.rel.{BiRel, RelNode, RelWriter}
 import org.apache.flink.api.common.typeinfo.TypeInformation
 import org.apache.flink.api.java.DataSet
-import org.apache.flink.api.table.{BatchTableEnvironment, TableConfig}
+import org.apache.flink.api.table.BatchTableEnvironment
 
-import scala.collection.JavaConverters._
 import scala.collection.JavaConversions._
+import scala.collection.JavaConverters._
 
 /**
 * Flink RelNode which matches along with UnionOperator.
@@ -55,7 +55,7 @@ class DataSetUnion(
   }
 
   override def toString: String = {
-    "Union(union: (${rowType.getFieldNames.asScala.toList.mkString(\", \")}))"
+    s"Union(union: ($unionSelectionToString))"
   }
 
   override def explainTerms(pw: RelWriter): RelWriter = {
@@ -76,8 +76,19 @@ class DataSetUnion(
       tableEnv: BatchTableEnvironment,
       expectedType: Option[TypeInformation[Any]]): DataSet[Any] = {
 
-    val leftDataSet = left.asInstanceOf[DataSetRel].translateToPlan(tableEnv)
-    val rightDataSet = right.asInstanceOf[DataSetRel].translateToPlan(tableEnv)
+    var leftDataSet: DataSet[Any] = null
+    var rightDataSet: DataSet[Any] = null
+
+    expectedType match {
+      case None =>
+        leftDataSet = left.asInstanceOf[DataSetRel].translateToPlan(tableEnv)
+        rightDataSet =
+          right.asInstanceOf[DataSetRel].translateToPlan(tableEnv, Some(leftDataSet.getType))
+      case _ =>
+        leftDataSet = left.asInstanceOf[DataSetRel].translateToPlan(tableEnv, expectedType)
+        rightDataSet = right.asInstanceOf[DataSetRel].translateToPlan(tableEnv, expectedType)
+    }
+
     leftDataSet.union(rightDataSet).asInstanceOf[DataSet[Any]]
   }
 

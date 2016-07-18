@@ -18,39 +18,40 @@
 
 package org.apache.flink.runtime.operators.testutils;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.LinkedList;
-import java.util.List;
-
 import org.apache.flink.api.common.ExecutionConfig;
-import org.apache.flink.metrics.MetricGroup;
-import org.apache.flink.metrics.util.DummyMetricGroup;
-import org.apache.flink.runtime.operators.Driver;
-import org.apache.flink.runtime.taskmanager.TaskManagerRuntimeInfo;
-import org.apache.flink.util.TestLogger;
-import org.junit.Assert;
 import org.apache.flink.api.common.functions.Function;
 import org.apache.flink.api.common.functions.util.FunctionUtils;
 import org.apache.flink.api.common.typeutils.TypeComparator;
 import org.apache.flink.api.common.typeutils.TypeSerializerFactory;
-import org.apache.flink.runtime.testutils.recordutils.RecordComparator;
-import org.apache.flink.runtime.testutils.recordutils.RecordSerializerFactory;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.groups.UnregisteredMetricsGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.jobgraph.tasks.AbstractInvokable;
 import org.apache.flink.runtime.memory.MemoryManager;
-import org.apache.flink.runtime.operators.TaskContext;
+import org.apache.flink.runtime.operators.Driver;
 import org.apache.flink.runtime.operators.ResettableDriver;
+import org.apache.flink.runtime.operators.TaskContext;
 import org.apache.flink.runtime.operators.sort.UnilateralSortMerger;
 import org.apache.flink.runtime.operators.util.TaskConfig;
+import org.apache.flink.runtime.taskmanager.TaskManagerRuntimeInfo;
+import org.apache.flink.runtime.testutils.recordutils.RecordComparator;
+import org.apache.flink.runtime.testutils.recordutils.RecordSerializerFactory;
 import org.apache.flink.types.Record;
 import org.apache.flink.util.Collector;
 import org.apache.flink.util.MutableObjectIterator;
+import org.apache.flink.util.TestLogger;
+
 import org.junit.After;
+import org.junit.Assert;
 import org.junit.runner.RunWith;
 import org.junit.runners.Parameterized;
+
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.LinkedList;
+import java.util.List;
 
 @RunWith(Parameterized.class)
 public class DriverTestBase<S extends Function> extends TestLogger implements TaskContext<S, Record> {
@@ -114,7 +115,8 @@ public class DriverTestBase<S extends Function> extends TestLogger implements Ta
 		this.owner = new DummyInvokable();
 		this.taskConfig = new TaskConfig(new Configuration());
 		this.executionConfig = executionConfig;
-		this.taskManageInfo = new TaskManagerRuntimeInfo("localhost", new Configuration());
+		this.taskManageInfo = new TaskManagerRuntimeInfo(
+				"localhost", new Configuration(), System.getProperty("java.io.tmpdir"));
 	}
 
 	@Parameterized.Parameters
@@ -144,7 +146,7 @@ public class DriverTestBase<S extends Function> extends TestLogger implements Ta
 	public void addInputSorted(MutableObjectIterator<Record> input, RecordComparator comp) throws Exception {
 		UnilateralSortMerger<Record> sorter = new UnilateralSortMerger<Record>(
 				this.memManager, this.ioManager, input, this.owner, RecordSerializerFactory.get(), comp,
-				this.perSortFractionMem, 32, 0.8f, true);
+				this.perSortFractionMem, 32, 0.8f, true /*use large record handler*/, true);
 		this.sorters.add(sorter);
 		this.inputs.add(null);
 	}
@@ -356,7 +358,7 @@ public class DriverTestBase<S extends Function> extends TestLogger implements Ta
 	}
 
 	@Override
-	public AbstractInvokable getOwningNepheleTask() {
+	public AbstractInvokable getContainingTask() {
 		return this.owner;
 	}
 
@@ -367,7 +369,7 @@ public class DriverTestBase<S extends Function> extends TestLogger implements Ta
 	
 	@Override
 	public MetricGroup getMetricGroup() {
-		return new DummyMetricGroup();
+		return new UnregisteredMetricsGroup();
 	}
 
 	// --------------------------------------------------------------------------------------------

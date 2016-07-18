@@ -237,6 +237,10 @@ data.reduceGroup(new GroupReduceFunction<Integer, Integer> {
   }
 });
 {% endhighlight %}
+        <p>If the reduce was applied to a grouped data set, you can specify the way that the
+        runtime executes the combine phase of the reduce via supplying a CombineHint as a second
+        parameter. The hash-based strategy should be faster in most cases, especially if the
+        number of different keys is small compared to the number of input elements (eg. 1/10).</p>
       </td>
     </tr>
 
@@ -287,7 +291,7 @@ result = input1.join(input2)
         <a href="dataset_transformations.html#join-algorithm-hints">Transformations Guide</a> for
         a list of possible hints and an example.</br>
         If no hint is specified, the system will try to make an estimate of the input sizes and
-        pick a the best strategy according to those estimates.
+        pick the best strategy according to those estimates.
 {% highlight java %}
 // This executes a join by broadcasting the first data set
 // using a hash table for the broadcasted data
@@ -463,6 +467,20 @@ DataSet<Tuple2<String, Integer>> out = in.project(2,0);
 {% endhighlight %}
       </td>
     </tr>
+    <tr>
+      <td><strong>MinBy / MaxBy</strong></td>
+      <td>
+        <p>Selects a tuple from a group of tuples whose values of one or more fields are minimum (maximum). The fields which are used for comparison must be valid key fields, i.e., comparable. If multiple tuples have minimum (maximum) field values, an arbitrary tuple of these tuples is returned. MinBy (MaxBy) may be applied on a full data set or a grouped data set.</p>
+{% highlight java %}
+DataSet<Tuple3<Integer, Double, String>> in = // [...]
+// a DataSet with a single tuple with minimum values for the Integer and String fields.
+DataSet<Tuple3<Integer, Double, String>> out = in.minBy(0, 2);
+// a DataSet with one tuple for each group with the minimum value for the Double field.
+DataSet<Tuple3<Integer, Double, String>> out2 = in.groupBy(2)
+                                                  .minBy(1);
+{% endhighlight %}
+      </td>
+    </tr>
   </tbody>
 </table>
 
@@ -593,7 +611,7 @@ val result = input1.join(input2).where(0).equalTo(1)
         <a href="dataset_transformations.html#join-algorithm-hints">Transformations Guide</a> for
         a list of possible hints and an example.</br>
         If no hint is specified, the system will try to make an estimate of the input sizes and
-        pick a the best strategy according to those estimates.
+        pick the best strategy according to those estimates.
 {% highlight scala %}
 // This executes a join by broadcasting the first data set
 // using a hash table for the broadcasted data
@@ -722,6 +740,35 @@ val result1 = in.first(3)
 val result2 = in.groupBy(0).first(3)
 // grouped-sorted data set
 val result3 = in.groupBy(0).sortGroup(1, Order.ASCENDING).first(3)
+{% endhighlight %}
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+----------
+
+The following transformations are available on data sets of Tuples:
+
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 20%">Transformation</th>
+      <th class="text-center">Description</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><strong>MinBy / MaxBy</strong></td>
+      <td>
+        <p>Selects a tuple from a group of tuples whose values of one or more fields are minimum (maximum). The fields which are used for comparison must be valid key fields, i.e., comparable. If multiple tuples have minimum (maximum) field values, an arbitrary tuple of these tuples is returned. MinBy (MaxBy) may be applied on a full data set or a grouped data set.</p>
+{% highlight java %}
+val in: DataSet[(Int, Double, String)] = // [...]
+// a data set with a single tuple with minimum values for the Int and String fields.
+val out: DataSet[(Int, Double, String)] = in.minBy(0, 2)
+// a data set with one tuple for each group with the minimum value for the Double field.
+val out2: DataSet[(Int, Double, String)] = in.groupBy(2)
+                                             .minBy(1)
 {% endhighlight %}
       </td>
     </tr>
@@ -1976,6 +2023,110 @@ of a function, or use the `withParameters(...)` method to pass in a configuratio
 
 {% top %}
 
+Distributed Cache
+-------------------
+
+Flink offers a distributed cache, similar to Apache Hadoop, to make files locally accessible to parallel instances of user functions. This functionality can be used to share files that contain static external data such as dictionaries or machine-learned regression models.
+
+The cache works as follows. A program registers a file or directory of a [local or remote filesystem such as HDFS or S3]({{ site.baseurl }}/apis/batch/connectors.html#reading-from-file-systems) under a specific name in its `ExecutionEnvironment` as a cached file. When the program is executed, Flink automatically copies the file or directory to the local filesystem of all workers. A user function can look up the file or directory under the specified name and access it from the worker's local filesystem. 
+
+The distributed cache is used as follows:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+
+Register the file or directory in the `ExecutionEnvironment`.
+
+{% highlight java %}
+ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+
+// register a file from HDFS
+env.registerCachedFile("hdfs:///path/to/your/file", "hdfsFile")
+
+// register a local executable file (script, executable, ...)
+env.registerCachedFile("file:///path/to/exec/file", "localExecFile", true)
+
+// define your program and execute
+...
+DataSet<String> input = ...
+DataSet<Integer> result = input.map(new MyMapper());
+...
+env.execute();
+{% endhighlight %}
+
+Access the cached file or directory in a user function (here a `MapFunction`). The function must extend a [RichFunction]({{ site.baseurl }}/apis/common/index.html#rich-functions) class because it needs access to the `RuntimeContext`.
+
+{% highlight java %}
+
+// extend a RichFunction to have access to the RuntimeContext
+public final class MyMapper extends RichMapFunction<String, Integer> {
+    
+    @Override
+    public void open(Configuration config) {
+      
+      // access cached file via RuntimeContext and DistributedCache
+      File myFile = getRuntimeContext().getDistributedCache().getFile("hdfsFile");
+      // read the file (or navigate the directory)
+      ...
+    }
+
+    @Override
+    public Integer map(String value) throws Exception {
+      // use content of cached file
+      ...
+    }
+}
+{% endhighlight %}
+
+</div>
+<div data-lang="scala" markdown="1">
+
+Register the file or directory in the `ExecutionEnvironment`.
+
+{% highlight scala %}
+val env = ExecutionEnvironment.getExecutionEnvironment
+
+// register a file from HDFS
+env.registerCachedFile("hdfs:///path/to/your/file", "hdfsFile")
+
+// register a local executable file (script, executable, ...)
+env.registerCachedFile("file:///path/to/exec/file", "localExecFile", true)
+
+// define your program and execute
+...
+val input: DataSet[String] = ...
+val result: DataSet[Integer] = input.map(new MyMapper())
+...
+env.execute()
+{% endhighlight %}
+
+Access the cached file in a user function (here a `MapFunction`). The function must extend a [RichFunction]({{ site.baseurl }}/apis/common/index.html#rich-functions) class because it needs access to the `RuntimeContext`.
+
+{% highlight scala %}
+
+// extend a RichFunction to have access to the RuntimeContext
+class MyMapper extends RichMapFunction[String, Int] {
+
+  override def open(config: Configuration): Unit = {
+
+    // access cached file via RuntimeContext and DistributedCache
+    val myFile: File = getRuntimeContext.getDistributedCache.getFile("hdfsFile")
+    // read the file (or navigate the directory)
+    ...
+  }
+
+  override def map(value: String): Int = {
+    // use content of cached file
+    ...
+  }
+}
+{% endhighlight %}
+
+</div>
+</div>
+
+{% top %}
+
 Passing Parameters to Functions
 -------------------
 
@@ -2024,7 +2175,7 @@ class MyFilter(limit: Int) extends FilterFunction[Int] {
 
 #### Via `withParameters(Configuration)`
 
-This method takes a Configuration object as an argument, which will be passed to the [rich function](#rich-functions)'s `open()`
+This method takes a Configuration object as an argument, which will be passed to the [rich function]({{ site.baseurl }}/apis/common/index.html#rich-functions)'s `open()`
 method. The Configuration object is a Map from String keys to different value types.
 
 <div class="codetabs" markdown="1">

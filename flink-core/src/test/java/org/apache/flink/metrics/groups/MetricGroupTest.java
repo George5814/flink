@@ -24,20 +24,34 @@ import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.MetricRegistry;
 
-import org.apache.flink.metrics.util.DummyMetricGroup;
+import org.junit.After;
+import org.junit.Before;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 import static org.junit.Assert.*;
 
 public class MetricGroupTest {
 	
-	private final MetricRegistry registry = new MetricRegistry(new Configuration());
+	private MetricRegistry registry;
 
 	private final MetricRegistry exceptionOnRegister = new ExceptionOnRegisterRegistry();
 
+	@Before
+	public void createRegistry() {
+		this.registry = new MetricRegistry(new Configuration());
+	}
+
+	@After
+	public void shutdownRegistry() {
+		this.registry.shutdown();
+		this.registry = null;
+	}
+
 	@Test
 	public void sameGroupOnNameCollision() {
-		GenericMetricGroup group = new GenericMetricGroup(registry, new DummyMetricGroup(registry), "somegroup");
+		GenericMetricGroup group = new GenericMetricGroup(
+		registry, new DummyAbstractMetricGroup(registry), "somegroup");
 
 		String groupName = "sometestname";
 		MetricGroup subgroup1 = group.addGroup(groupName);
@@ -51,7 +65,7 @@ public class MetricGroupTest {
 	@Test
 	public void closedGroupDoesNotRegisterMetrics() {
 		GenericMetricGroup group = new GenericMetricGroup(
-				exceptionOnRegister, new DummyMetricGroup(exceptionOnRegister), "testgroup");
+				exceptionOnRegister, new DummyAbstractMetricGroup(exceptionOnRegister), "testgroup");
 		assertFalse(group.isClosed());
 
 		group.close();
@@ -68,7 +82,7 @@ public class MetricGroupTest {
 	@Test
 	public void closedGroupCreatesClosedGroups() {
 		GenericMetricGroup group = new GenericMetricGroup(exceptionOnRegister,
-				new DummyMetricGroup(exceptionOnRegister), "testgroup");
+				new DummyAbstractMetricGroup(exceptionOnRegister), "testgroup");
 		assertFalse(group.isClosed());
 
 		group.close();
@@ -82,7 +96,7 @@ public class MetricGroupTest {
 	public void tolerateMetricNameCollisions() {
 		final String name = "abctestname";
 		GenericMetricGroup group = new GenericMetricGroup(
-				registry, new DummyMetricGroup(registry), "testgroup");
+				registry, new DummyAbstractMetricGroup(registry), "testgroup");
 		
 		assertNotNull(group.counter(name));
 		assertNotNull(group.counter(name));
@@ -91,17 +105,11 @@ public class MetricGroupTest {
 	@Test
 	public void tolerateMetricAndGroupNameCollisions() {
 		final String name = "abctestname";
-		GenericMetricGroup group = new GenericMetricGroup(registry, new DummyMetricGroup(registry), "testgroup");
+		GenericMetricGroup group = new GenericMetricGroup(
+				registry, new DummyAbstractMetricGroup(registry), "testgroup");
 		
 		assertNotNull(group.addGroup(name));
 		assertNotNull(group.counter(name));
-	}
-	
-	@Test(expected = IllegalArgumentException.class)
-	public void exceptionOnIllegalName() {
-		GenericMetricGroup group = new GenericMetricGroup(
-				exceptionOnRegister, new DummyMetricGroup(exceptionOnRegister), "testgroup");
-		group.counter("ÜberCöunter");
 	}
 	
 	// ------------------------------------------------------------------------
@@ -120,6 +128,23 @@ public class MetricGroupTest {
 		@Override
 		public void unregister(Metric metric, String name, AbstractMetricGroup parent) {
 			fail("Metric should never be un-registered");
+		}
+	}
+
+	// ------------------------------------------------------------------------
+	
+	private static class DummyAbstractMetricGroup extends AbstractMetricGroup {
+
+		public DummyAbstractMetricGroup(MetricRegistry registry) {
+			super(registry, new String[0]);
+		}
+
+		@Override
+		protected void addMetric(String name, Metric metric) {}
+
+		@Override
+		public MetricGroup addGroup(String name) {
+			return new DummyAbstractMetricGroup(registry);
 		}
 	}
 }

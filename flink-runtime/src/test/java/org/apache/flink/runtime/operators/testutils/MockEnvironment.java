@@ -25,7 +25,6 @@ import org.apache.flink.configuration.UnmodifiableConfiguration;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.memory.MemorySegmentFactory;
 import org.apache.flink.metrics.groups.TaskMetricGroup;
-import org.apache.flink.metrics.util.DummyTaskMetricGroup;
 import org.apache.flink.runtime.accumulators.AccumulatorRegistry;
 import org.apache.flink.runtime.broadcast.BroadcastVariableManager;
 import org.apache.flink.runtime.execution.Environment;
@@ -208,12 +207,15 @@ public class MockEnvironment implements Environment {
 
 	@Override
 	public TaskManagerRuntimeInfo getTaskManagerInfo() {
-		return new TaskManagerRuntimeInfo("localhost", new UnmodifiableConfiguration(new Configuration()));
+		return new TaskManagerRuntimeInfo(
+				"localhost",
+				new UnmodifiableConfiguration(new Configuration()),
+				System.getProperty("java.io.tmpdir"));
 	}
 
 	@Override
 	public TaskMetricGroup getMetricGroup() {
-		return new DummyTaskMetricGroup();
+		return new UnregisteredTaskMetricsGroup();
 	}
 
 	@Override
@@ -286,5 +288,10 @@ public class MockEnvironment implements Environment {
 	@Override
 	public void acknowledgeCheckpoint(long checkpointId, StateHandle<?> state) {
 		throw new UnsupportedOperationException();
+	}
+
+	@Override
+	public void failExternally(Throwable cause) {
+		throw new UnsupportedOperationException("MockEnvironment does not support external task failure.");
 	}
 }

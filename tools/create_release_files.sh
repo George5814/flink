@@ -182,7 +182,7 @@ deploy_to_maven() {
   # are depending on scala 2.10.
   echo "Deploying Scala 2.10 version"
   cd tools && ./change-scala-version.sh 2.10 && cd ..
-  $MVN clean deploy -Dgpg.executable=$GPG -Prelease,docs-and-source,include-kinesis --settings deploysettings.xml -DskipTests -Dgpg.keyname=$GPG_KEY -Dgpg.passphrase=$GPG_PASSPHRASE -DretryFailedDeploymentCount=10
+  $MVN clean deploy -Dgpg.executable=$GPG -Prelease,docs-and-source --settings deploysettings.xml -DskipTests -Dgpg.keyname=$GPG_KEY -Dgpg.passphrase=$GPG_PASSPHRASE -DretryFailedDeploymentCount=10
 
 
   echo "Deploying Scala 2.10 / hadoop 1 version"
@@ -190,15 +190,18 @@ deploy_to_maven() {
 
 
   sleep 4
-  $MVN clean deploy -Dgpg.executable=$GPG -Prelease,docs-and-source,include-kinesis --settings deploysettings.xml -DskipTests -Dgpg.keyname=$GPG_KEY -Dgpg.passphrase=$GPG_PASSPHRASE -DretryFailedDeploymentCount=10
+  $MVN clean deploy -Dgpg.executable=$GPG -Prelease,docs-and-source --settings deploysettings.xml -DskipTests -Dgpg.keyname=$GPG_KEY -Dgpg.passphrase=$GPG_PASSPHRASE -DretryFailedDeploymentCount=10
 }
 
 copy_data() {
   # Copy data
   echo "Copying release tarballs"
   folder=flink-$RELEASE_VERSION-$RELEASE_CANDIDATE
-  ssh $USER_NAME@people.apache.org mkdir -p /home/$USER_NAME/public_html/$folder
-  rsync flink-*.tgz* $USER_NAME@people.apache.org:/home/$USER_NAME/public_html/$folder/
+  sftp $USER_NAME@home.apache.org <<EOF
+mkdir public_html/$folder
+put flink-*.tgz* public_html/$folder
+bye
+EOF
   echo "copy done"
 }
 

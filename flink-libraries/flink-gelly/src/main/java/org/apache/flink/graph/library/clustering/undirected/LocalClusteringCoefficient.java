@@ -18,7 +18,6 @@
 
 package org.apache.flink.graph.library.clustering.undirected;
 
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.common.functions.JoinFunction;
 import org.apache.flink.api.common.functions.ReduceFunction;
@@ -27,14 +26,17 @@ import org.apache.flink.api.java.functions.FunctionAnnotation;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.tuple.Tuple3;
 import org.apache.flink.graph.Graph;
-import org.apache.flink.graph.GraphAlgorithm;
 import org.apache.flink.graph.Vertex;
 import org.apache.flink.graph.asm.degree.annotate.undirected.VertexDegree;
 import org.apache.flink.graph.library.clustering.undirected.LocalClusteringCoefficient.Result;
 import org.apache.flink.graph.utils.Murmur3_32;
+import org.apache.flink.graph.utils.proxy.GraphAlgorithmDelegatingDataSet;
 import org.apache.flink.types.CopyableValue;
 import org.apache.flink.types.LongValue;
 import org.apache.flink.util.Collector;
+import org.apache.flink.util.Preconditions;
+
+import static org.apache.flink.api.common.ExecutionConfig.PARALLELISM_DEFAULT;
 
 /**
  * The local clustering coefficient measures the connectedness of each vertex's
@@ -53,10 +55,10 @@ import org.apache.flink.util.Collector;
  * @param <EV> edge value type
  */
 public class LocalClusteringCoefficient<K extends Comparable<K> & CopyableValue<K>, VV, EV>
-implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
+extends GraphAlgorithmDelegatingDataSet<K, VV, EV, Result<K>> {
 
 	// Optional configuration
-	private int littleParallelism = ExecutionConfig.PARALLELISM_UNKNOWN;
+	private int littleParallelism = PARALLELISM_DEFAULT;
 
 	/**
 	 * Override the parallelism of operators processing small amounts of data.
@@ -65,9 +67,32 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 	 * @return this
 	 */
 	public LocalClusteringCoefficient<K, VV, EV> setLittleParallelism(int littleParallelism) {
+		Preconditions.checkArgument(littleParallelism > 0 || littleParallelism == PARALLELISM_DEFAULT,
+			"The parallelism must be greater than zero.");
+
 		this.littleParallelism = littleParallelism;
 
 		return this;
+	}
+
+	@Override
+	protected String getAlgorithmName() {
+		return LocalClusteringCoefficient.class.getName();
+	}
+
+	@Override
+	protected boolean mergeConfiguration(GraphAlgorithmDelegatingDataSet other) {
+		Preconditions.checkNotNull(other);
+
+		if (! LocalClusteringCoefficient.class.isAssignableFrom(other.getClass())) {
+			return false;
+		}
+
+		LocalClusteringCoefficient rhs = (LocalClusteringCoefficient) other;
+
+		littleParallelism = Math.min(littleParallelism, rhs.littleParallelism);
+
+		return true;
 	}
 
 	/*
@@ -81,12 +106,11 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 	 */
 
 	@Override
-	public DataSet<Result<K>> run(Graph<K, VV, EV> input)
+	public DataSet<Result<K>> runInternal(Graph<K, VV, EV> input)
 			throws Exception {
 		// u, v, w
 		DataSet<Tuple3<K,K,K>> triangles = input
 			.run(new TriangleListing<K,VV,EV>()
-				.setSortTriangleVertices(false)
 				.setLittleParallelism(littleParallelism));
 
 		// u, 1
@@ -97,7 +121,7 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 		// u, triangle count
 		DataSet<Tuple2<K, LongValue>> vertexTriangleCount = triangleVertices
 			.groupBy(0)
-			.reduce(new CountVertices<K>())
+			.reduce(new CountTriangles<K>())
 				.name("Count triangles");
 
 		// u, deg(u)
@@ -140,12 +164,12 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 	}
 
 	/**
-	 * Combines the count of each vertex ID.
+	 * Sums the triangle count for each vertex ID.
 	 *
 	 * @param <T> ID type
 	 */
 	@FunctionAnnotation.ForwardedFields("0")
-	private static class CountVertices<T>
+	private static class CountTriangles<T>
 	implements ReduceFunction<Tuple2<T, LongValue>> {
 		@Override
 		public Tuple2<T, LongValue> reduce(Tuple2<T, LongValue> left, Tuple2<T, LongValue> right)
@@ -180,7 +204,7 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 	}
 
 	/**
-	 * Wraps the vertex type to encapsulate results from the Clustering Coefficient algorithm.
+	 * Wraps the vertex type to encapsulate results from the Local Clustering Coefficient algorithm.
 	 *
 	 * @param <T> ID type
 	 */
@@ -190,9 +214,6 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 
 		private Murmur3_32 hasher = new Murmur3_32(HASH_SEED);
 
-		/**
-		 * The no-arg constructor instantiates contained objects.
-		 */
 		public Result() {
 			f1 = new Tuple2<>();
 		}
@@ -233,6 +254,11 @@ implements GraphAlgorithm<K, VV, EV, DataSet<Result<K>>> {
 			return (neighborPairs == 0) ? Double.NaN : getTriangleCount().getValue() / (double)neighborPairs;
 		}
 
+		/**
+		 * Format values into a human-readable string.
+		 *
+		 * @return verbose string
+		 */
 		public String toVerboseString() {
 			return "Vertex ID: " + f0
 				+ ", vertex degree: " + getDegree()

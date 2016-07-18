@@ -55,7 +55,7 @@ Other parameters for checkpointing include:
 
 - *number of concurrent checkpoints*: By default, the system will not trigger another checkpoint while one is still in progress. This ensures that the topology does not spend too much time on checkpoints and not make progress with processing the streams. It is possible to allow for multiple overlapping checkpoints, which is interesting for pipelines that have a certain processing delay (for example because the functions call external services that need some time to respond) but that still want to do very frequent checkpoints (100s of milliseconds) to re-process very little upon failures.
 
-- *checkpoint timeout*: The time after which a checkpoint-in-progress is aborted, if it did not complete until then.
+- *checkpoint timeout*: The time after which a checkpoint-in-progress is aborted, if it did not complete by then.
 
 <div class="codetabs" markdown="1">
 <div data-lang="java" markdown="1">
@@ -103,8 +103,9 @@ env.getCheckpointConfig.setMaxConcurrentCheckpoints(1)
 ### Fault Tolerance Guarantees of Data Sources and Sinks
 
 Flink can guarantee exactly-once state updates to user-defined state only when the source participates in the
-snapshotting mechanism. This is currently guaranteed for the Kafka source (and internal number generators), but
-not for other sources. The following table lists the state update guarantees of Flink coupled with the bundled sources:
+snapshotting mechanism. The following table lists the state update guarantees of Flink coupled with the bundled connectors.
+
+Please read the documentation of each connector to understand the details of the fault tolerance guarantees.
 
 <table class="table table-bordered">
   <thead>
@@ -119,6 +120,11 @@ not for other sources. The following table lists the state update guarantees of 
             <td>Apache Kafka</td>
             <td>exactly once</td>
             <td>Use the appropriate Kafka connector for your version</td>
+        </tr>
+        <tr>
+            <td>AWS Kinesis Streams</td>
+            <td>exactly once</td>
+            <td></td>
         </tr>
         <tr>
             <td>RabbitMQ</td>
@@ -137,8 +143,8 @@ not for other sources. The following table lists the state update guarantees of 
         </tr>
         <tr>
             <td>Files</td>
-            <td>at least once</td>
-            <td>At failure the file will be read from the beginning</td>
+            <td>exactly once</td>
+            <td></td>
         </tr>
         <tr>
             <td>Sockets</td>
@@ -177,6 +183,16 @@ state updates) of Flink coupled with bundled sinks:
         <td></td>
     </tr>
     <tr>
+        <td>Cassandra sink</td>
+        <td>at least once / exactly once</td>
+        <td>exactly once only for idempotent updates</td>
+    </tr>
+    <tr>
+        <td>AWS Kinesis Streams</td>
+        <td>at least once</td>
+        <td></td>
+    </tr>
+    <tr>
         <td>File sinks</td>
         <td>at least once</td>
         <td></td>
@@ -188,6 +204,11 @@ state updates) of Flink coupled with bundled sinks:
     </tr>
     <tr>
         <td>Standard output</td>
+        <td>at least once</td>
+        <td></td>
+    </tr>
+    <tr>
+        <td>Redis sink</td>
         <td>at least once</td>
         <td></td>
     </tr>
@@ -224,6 +245,10 @@ The description of each restart strategy contains more information about the res
         <td>fixed-delay</td>
     </tr>
     <tr>
+        <td>Failure rate</td>
+        <td>failure-rate</td>
+    </tr>
+    <tr>
         <td>No restart</td>
         <td>none</td>
     </tr>
@@ -241,18 +266,18 @@ In case of a failure the system tries to restart the job 3 times and waits 10 se
 <div data-lang="java" markdown="1">
 {% highlight java %}
 ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
-env.setRestartStrategy(RestartStrategies.fixedDelay(
+env.setRestartStrategy(RestartStrategies.fixedDelayRestart(
   3, // number of restart attempts 
-  10000 // delay in milliseconds
+  Time.of(10, TimeUnit.SECONDS) // delay
 ));
 {% endhighlight %}
 </div>
 <div data-lang="scala" markdown="1">
 {% highlight scala %}
 val env = ExecutionEnvironment.getExecutionEnvironment()
-env.setRestartStrategy(RestartStrategies.fixedDelay(
+env.setRestartStrategy(RestartStrategies.fixedDelayRestart(
   3, // number of restart attempts 
-  10000 // delay in milliseconds
+  Time.of(10, TimeUnit.SECONDS) // delay
 ))
 {% endhighlight %}
 </div>
@@ -305,18 +330,18 @@ The fixed delay restart strategy can also be set programmatically:
 <div data-lang="java" markdown="1">
 {% highlight java %}
 ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
-env.setRestartStrategy(RestartStrategies.fixedDelay(
+env.setRestartStrategy(RestartStrategies.fixedDelayRestart(
   3, // number of restart attempts 
-  10000 // delay in milliseconds
+  Time.of(10, TimeUnit.SECONDS) // delay
 ));
 {% endhighlight %}
 </div>
 <div data-lang="scala" markdown="1">
 {% highlight scala %}
 val env = ExecutionEnvironment.getExecutionEnvironment()
-env.setRestartStrategy(RestartStrategies.fixedDelay(
+env.setRestartStrategy(RestartStrategies.fixedDelayRestart(
   3, // number of restart attempts 
-  10000 // delay in milliseconds
+  Time.of(10, TimeUnit.SECONDS) // delay
 ))
 {% endhighlight %}
 </div>
@@ -335,6 +360,77 @@ Execution retries can be configured to be delayed. Delaying the retry means that
 Delaying the retries can be helpful when the program interacts with external systems where for example connections or pending transactions should reach a timeout before re-execution is attempted.
 
 The default value is the value of *akka.ask.timeout*.
+
+{% top %}
+
+### Failure Rate Restart Strategy
+
+The failure rate restart strategy restarts job after failure, but when `failure rate` (failures per time interval) is exceeded, the job eventually fails.
+In-between two consecutive restart attempts, the restart strategy waits a fixed amount of time.
+
+This strategy is enabled as default by setting the following configuration parameter in `flink-conf.yaml`.
+
+~~~
+restart-strategy: failure-rate
+~~~
+
+<table class="table table-bordered">
+  <thead>
+    <tr>
+      <th class="text-left" style="width: 40%">Configuration Parameter</th>
+      <th class="text-left" style="width: 40%">Description</th>
+      <th class="text-left">Default Value</th>
+    </tr>
+  </thead>
+  <tbody>
+    <tr>
+        <td><it>restart-strategy.failure-rate.max-failures-per-interval</it></td>
+        <td>Maximum number of restarts in given time interval before failing a job</td>
+        <td>1</td>
+    </tr>
+    <tr>
+        <td><it>restart-strategy.failure-rate.failure-rate-interval</it></td>
+        <td>Time interval for measuring failure rate.</td>
+        <td>1 minute</td>
+    </tr>
+    <tr>
+        <td><it>restart-strategy.failure-rate.delay</it></td>
+        <td>Delay between two consecutive restart attempts</td>
+        <td><it>akka.ask.timeout</it></td>
+    </tr>
+  </tbody>
+</table>
+
+~~~
+restart-strategy.failure-rate.max-failures-per-interval: 3
+restart-strategy.failure-rate.failure-rate-interval: 5 min
+restart-strategy.failure-rate.delay: 10 s
+~~~
+
+The failure rate restart strategy can also be set programmatically:
+
+<div class="codetabs" markdown="1">
+<div data-lang="java" markdown="1">
+{% highlight java %}
+ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
+env.setRestartStrategy(RestartStrategies.failureRateRestart(
+  3, // max failures per interval
+  Time.of(5, TimeUnit.MINUTES), //time interval for measuring failure rate
+  Time.of(10, TimeUnit.SECONDS) // delay
+));
+{% endhighlight %}
+</div>
+<div data-lang="scala" markdown="1">
+{% highlight scala %}
+val env = ExecutionEnvironment.getExecutionEnvironment()
+env.setRestartStrategy(RestartStrategies.failureRateRestart(
+  3, // max failures per unit
+  Time.of(5, TimeUnit.MINUTES), //time interval for measuring failure rate
+  Time.of(10, TimeUnit.SECONDS) // delay
+))
+{% endhighlight %}
+</div>
+</div>
 
 {% top %}
 

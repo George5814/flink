@@ -18,7 +18,6 @@
 
 package org.apache.flink.runtime.taskmanager;
 
-import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.JobID;
 import org.apache.flink.configuration.ConfigConstants;
 import org.apache.flink.configuration.Configuration;
@@ -41,15 +40,17 @@ import org.apache.flink.runtime.testingUtils.TestingCluster;
 import org.apache.flink.runtime.testingUtils.TestingUtils;
 import org.apache.flink.runtime.testutils.JobManagerActorTestUtils;
 import org.apache.flink.types.IntValue;
+
 import org.junit.Test;
+
 import scala.concurrent.Await;
 import scala.concurrent.Future;
 import scala.concurrent.duration.FiniteDuration;
 
-import static com.google.common.base.Preconditions.checkNotNull;
 import static org.apache.flink.runtime.messages.JobManagerMessages.CancelJob;
 import static org.apache.flink.runtime.messages.JobManagerMessages.CancellationFailure;
 import static org.apache.flink.runtime.messages.JobManagerMessages.RequestJobStatus;
+import static org.apache.flink.util.Preconditions.checkNotNull;
 
 public class TaskCancelTest {
 
@@ -200,7 +201,7 @@ public class TaskCancelTest {
 				if (status.status() == JobStatus.RUNNING) {
 					return;
 				}
-				else if (status.status().isTerminalState()) {
+				else if (status.status().isGloballyTerminalState()) {
 					throw new Exception("JobStatus changed to " + status.status()
 							+ " while waiting for job to start running.");
 				}
@@ -247,10 +248,11 @@ public class TaskCancelTest {
 		@Override
 		public void invoke() throws Exception {
 			UnionInputGate union = new UnionInputGate(getEnvironment().getAllInputGates());
-			RecordReader<IntValue> reader = new RecordReader<>(union, IntValue.class);
+			RecordReader<IntValue> reader = new RecordReader<>(
+					union, IntValue.class, getEnvironment().getTaskManagerInfo().getTmpDirectories());
 
-			while (reader.next() != null) {
-			}
+			//noinspection StatementWithEmptyBody
+			while (reader.next() != null) {}
 		}
 	}
 }

@@ -190,9 +190,9 @@ val graph = Graph.fromTuple2DataSet(edges, env)
 {% highlight java %}
 ExecutionEnvironment env = ExecutionEnvironment.getExecutionEnvironment();
 
-DataSet<Tuple2<String, Long>> vertexTuples = env.readCsvFile("path/to/vertex/input");
+DataSet<Tuple2<String, Long>> vertexTuples = env.readCsvFile("path/to/vertex/input").types(String.class, Long.class);
 
-DataSet<Tuple3<String, String, Double>> edgeTuples = env.readCsvFile("path/to/edge/input");
+DataSet<Tuple3<String, String, Double>> edgeTuples = env.readCsvFile("path/to/edge/input").types(String.class, String.class, Double.class);
 
 Graph<String, Long, Double> graph = Graph.fromTupleDataSet(vertexTuples, edgeTuples, env);
 {% endhighlight %}
@@ -346,13 +346,13 @@ DataSet<K> getVertexIds()
 DataSet<Tuple2<K, K>> getEdgeIds()
 
 // get a DataSet of <vertex ID, in-degree> pairs for all vertices
-DataSet<Tuple2<K, Long>> inDegrees()
+DataSet<Tuple2<K, LongValue>> inDegrees()
 
 // get a DataSet of <vertex ID, out-degree> pairs for all vertices
-DataSet<Tuple2<K, Long>> outDegrees()
+DataSet<Tuple2<K, LongValue>> outDegrees()
 
 // get a DataSet of <vertex ID, degree> pairs for all vertices, where degree is the sum of in- and out- degrees
-DataSet<Tuple2<K, Long>> getDegrees()
+DataSet<Tuple2<K, LongValue>> getDegrees()
 
 // get the number of vertices
 long numberOfVertices()
@@ -381,13 +381,13 @@ getVertexIds: DataSet[K]
 getEdgeIds: DataSet[(K, K)]
 
 // get a DataSet of <vertex ID, in-degree> pairs for all vertices
-inDegrees: DataSet[(K, Long)]
+inDegrees: DataSet[(K, LongValue)]
 
 // get a DataSet of <vertex ID, out-degree> pairs for all vertices
-outDegrees: DataSet[(K, Long)]
+outDegrees: DataSet[(K, LongValue)]
 
 // get a DataSet of <vertex ID, degree> pairs for all vertices, where degree is the sum of in- and out- degrees
-getDegrees: DataSet[(K, Long)]
+getDegrees: DataSet[(K, LongValue)]
 
 // get the number of vertices
 numberOfVertices: Long
@@ -519,13 +519,13 @@ Note that if the input dataset contains a key multiple times, all Gelly join met
 {% highlight java %}
 Graph<Long, Double, Double> network = ...
 
-DataSet<Tuple2<Long, Long>> vertexOutDegrees = network.outDegrees();
+DataSet<Tuple2<Long, LongValue>> vertexOutDegrees = network.outDegrees();
 
 // assign the transition probabilities as the edge weights
 Graph<Long, Double, Double> networkWithWeights = network.joinWithEdgesOnSource(vertexOutDegrees,
-				new VertexJoinFunction<Double, Long>() {
-					public Double vertexJoin(Double vertexValue, Long inputValue) {
-						return vertexValue / inputValue;
+				new VertexJoinFunction<Double, LongValue>() {
+					public Double vertexJoin(Double vertexValue, LongValue inputValue) {
+						return vertexValue / inputValue.getValue();
 					}
 				});
 {% endhighlight %}
@@ -535,10 +535,10 @@ Graph<Long, Double, Double> networkWithWeights = network.joinWithEdgesOnSource(v
 {% highlight scala %}
 val network: Graph[Long, Double, Double] = ...
 
-val vertexOutDegrees: DataSet[(Long, Long)] = network.outDegrees
+val vertexOutDegrees: DataSet[(Long, LongValue)] = network.outDegrees
 
 // assign the transition probabilities as the edge weights
-val networkWithWeights = network.joinWithEdgesOnSource(vertexOutDegrees, (v1: Double, v2: Long) => v1 / v2)
+val networkWithWeights = network.joinWithEdgesOnSource(vertexOutDegrees, (v1: Double, v2: LongValue) => v1 / v2.getValue)
 {% endhighlight %}
 </div>
 </div>
@@ -1083,10 +1083,10 @@ final class Compute extends ComputeFunction {
 ### Scatter-Gather Iterations
 The scatter-gather model, also known as "signal/collect" model, expresses computation from the perspective of a vertex in the graph. The computation proceeds in synchronized iteration steps, called supersteps. In each superstep, a vertex produces messages for other vertices and updates its value based on the messages it receives. To use scatter-gather iterations in Gelly, the user only needs to define how a vertex behaves in each superstep:
 
-* <strong>Messaging</strong>:  corresponds to the scatter phase and produces the messages that a vertex will send to other vertices.
-* <strong>Value Update</strong>: corresponds to the gather phase and updates the vertex value using the received messages.
+* <strong>Scatter</strong>:  produces the messages that a vertex will send to other vertices.
+* <strong>Gather</strong>: updates the vertex value using received messages.
 
-Gelly provides methods for scatter-gather iterations. The user only needs to implement two functions, corresponding to the scatter and gather phases. The first function is a `MessagingFunction`, which allows a vertex to send out messages for other vertices. Messages are recieved during the same superstep as they are sent. The second function is `VertexUpdateFunction`, which defines how a vertex will update its value based on the received messages.
+Gelly provides methods for scatter-gather iterations. The user only needs to implement two functions, corresponding to the scatter and gather phases. The first function is a `ScatterFunction`, which allows a vertex to send out messages to other vertices. Messages are received during the same superstep as they are sent. The second function is `GatherFunction`, which defines how a vertex will update its value based on the received messages.
 These functions and the maximum number of iterations to run are given as parameters to Gelly's `runScatterGatherIteration`. This method will execute the scatter-gather iteration on the input Graph and return a new Graph, with updated vertex values.
 
 A scatter-gather iteration can be extended with information such as the total number of vertices, the in degree and out degree.
@@ -1109,7 +1109,7 @@ int maxIterations = 10;
 
 // Execute the scatter-gather iteration
 Graph<Long, Double, Double> result = graph.runScatterGatherIteration(
-			new VertexDistanceUpdater(), new MinDistanceMessenger(), maxIterations);
+			new MinDistanceMessenger(), new VertexDistanceUpdater(), maxIterations);
 
 // Extract the vertices as the result
 DataSet<Vertex<Long, Double>> singleSourceShortestPaths = result.getVertices();
@@ -1118,7 +1118,7 @@ DataSet<Vertex<Long, Double>> singleSourceShortestPaths = result.getVertices();
 // - - -  UDFs - - - //
 
 // scatter: messaging
-public static final class MinDistanceMessenger extends MessagingFunction<Long, Double, Double, Double> {
+public static final class MinDistanceMessenger extends ScatterFunction<Long, Double, Double, Double> {
 
 	public void sendMessages(Vertex<Long, Double> vertex) {
 		for (Edge<Long, Double> edge : getEdges()) {
@@ -1128,7 +1128,7 @@ public static final class MinDistanceMessenger extends MessagingFunction<Long, D
 }
 
 // gather: vertex update
-public static final class VertexDistanceUpdater extends VertexUpdateFunction<Long, Double, Double> {
+public static final class VertexDistanceUpdater extends GatherFunction<Long, Double, Double> {
 
 	public void updateVertex(Vertex<Long, Double> vertex, MessageIterator<Double> inMessages) {
 		Double minDistance = Double.MAX_VALUE;
@@ -1157,7 +1157,7 @@ val graph: Graph[Long, Double, Double] = ...
 val maxIterations = 10
 
 // Execute the scatter-gather iteration
-val result = graph.runScatterGatherIteration(new VertexDistanceUpdater, new MinDistanceMessenger, maxIterations)
+val result = graph.runScatterGatherIteration(new MinDistanceMessenger, new VertexDistanceUpdater, maxIterations)
 
 // Extract the vertices as the result
 val singleSourceShortestPaths = result.getVertices
@@ -1166,7 +1166,7 @@ val singleSourceShortestPaths = result.getVertices
 // - - -  UDFs - - - //
 
 // messaging
-final class MinDistanceMessenger extends MessagingFunction[Long, Double, Double, Double] {
+final class MinDistanceMessenger extends ScatterFunction[Long, Double, Double, Double] {
 
 	override def sendMessages(vertex: Vertex[Long, Double]) = {
 		for (edge: Edge[Long, Double] <- getEdges) {
@@ -1176,7 +1176,7 @@ final class MinDistanceMessenger extends MessagingFunction[Long, Double, Double,
 }
 
 // vertex update
-final class VertexDistanceUpdater extends VertexUpdateFunction[Long, Double, Double] {
+final class VertexDistanceUpdater extends GatherFunction[Long, Double, Double] {
 
 	override def updateVertex(vertex: Vertex[Long, Double], inMessages: MessageIterator[Double]) = {
 		var minDistance = Double.MaxValue
@@ -1211,9 +1211,9 @@ and can be specified using the `setName()` method.
 * <strong>Solution set in unmanaged memory</strong>: Defines whether the solution set is kept in managed memory (Flink's internal way of keeping objects in serialized form) or as a simple object map. By default, the solution set runs in managed memory. This property can be set using the `setSolutionSetUnmanagedMemory()` method.
 
 * <strong>Aggregators</strong>: Iteration aggregators can be registered using the `registerAggregator()` method. An iteration aggregator combines
-all aggregates globally once per superstep and makes them available in the next superstep. Registered aggregators can be accessed inside the user-defined `VertexUpdateFunction` and `MessagingFunction`.
+all aggregates globally once per superstep and makes them available in the next superstep. Registered aggregators can be accessed inside the user-defined `ScatterFunction` and `GatherFunction`.
 
-* <strong>Broadcast Variables</strong>: DataSets can be added as [Broadcast Variables]({{site.baseurl}}/apis/batch/index.html#broadcast-variables) to the `VertexUpdateFunction` and `MessagingFunction`, using the `addBroadcastSetForUpdateFunction()` and `addBroadcastSetForMessagingFunction()` methods, respectively.
+* <strong>Broadcast Variables</strong>: DataSets can be added as [Broadcast Variables]({{site.baseurl}}/apis/batch/index.html#broadcast-variables) to the `ScatterFunction` and `GatherFunction`, using the `addBroadcastSetForUpdateFunction()` and `addBroadcastSetForMessagingFunction()` methods, respectively.
 
 * <strong>Number of Vertices</strong>: Accessing the total number of vertices within the iteration. This property can be set using the `setOptNumVertices()` method.
 The number of vertices can then be accessed in the vertex update function and in the messaging function using the `getNumberOfVertices()` method. If the option is not set in the configuration, this method will return -1.
@@ -1245,10 +1245,12 @@ parameters.registerAggregator("sumAggregator", new LongSumAggregator());
 // run the scatter-gather iteration, also passing the configuration parameters
 Graph<Long, Double, Double> result =
 			graph.runScatterGatherIteration(
-			new VertexUpdater(), new Messenger(), maxIterations, parameters);
+			new Messenger(), new VertexUpdater(), maxIterations, parameters);
 
 // user-defined functions
-public static final class VertexUpdater extends VertexUpdateFunction {
+public static final class Messenger extends ScatterFunction {...}
+
+public static final class VertexUpdater extends GatherFunction {
 
 	LongSumAggregator aggregator = new LongSumAggregator();
 
@@ -1272,8 +1274,6 @@ public static final class VertexUpdater extends VertexUpdateFunction {
 	}
 }
 
-public static final class Messenger extends MessagingFunction {...}
-
 {% endhighlight %}
 </div>
 
@@ -1294,10 +1294,12 @@ parameters.setParallelism(16)
 parameters.registerAggregator("sumAggregator", new LongSumAggregator)
 
 // run the scatter-gather iteration, also passing the configuration parameters
-val result = graph.runScatterGatherIteration(new VertexUpdater, new Messenger, maxIterations, parameters)
+val result = graph.runScatterGatherIteration(new Messenger, new VertexUpdater, maxIterations, parameters)
 
 // user-defined functions
-final class VertexUpdater extends VertexUpdateFunction {
+final class Messenger extends ScatterFunction {...}
+
+final class VertexUpdater extends GatherFunction {
 
 	var aggregator = new LongSumAggregator
 
@@ -1320,8 +1322,6 @@ final class VertexUpdater extends VertexUpdateFunction {
 		setNewVertexValue(...)
 	}
 }
-
-final class Messenger extends MessagingFunction {...}
 
 {% endhighlight %}
 </div>
@@ -1347,20 +1347,20 @@ parameters.setOptDegrees(true);
 // run the scatter-gather iteration, also passing the configuration parameters
 Graph<Long, Double, Double> result =
 			graph.runScatterGatherIteration(
-			new VertexUpdater(), new Messenger(), maxIterations, parameters);
+			new Messenger(), new VertexUpdater(), maxIterations, parameters);
 
 // user-defined functions
-public static final class VertexUpdater {
-	...
-	// get the number of vertices
-	long numVertices = getNumberOfVertices();
-	...
-}
-
-public static final class Messenger {
+public static final class Messenger extends ScatterFunction {
 	...
 	// retrieve the vertex out-degree
 	outDegree = getOutDegree();
+	...
+}
+
+public static final class VertexUpdater extends GatherFunction {
+	...
+	// get the number of vertices
+	long numVertices = getNumberOfVertices();
 	...
 }
 
@@ -1382,20 +1382,20 @@ parameters.setOptNumVertices(true)
 parameters.setOptDegrees(true)
 
 // run the scatter-gather iteration, also passing the configuration parameters
-val result = graph.runScatterGatherIteration(new VertexUpdater, new Messenger, maxIterations, parameters)
+val result = graph.runScatterGatherIteration(new Messenger, new VertexUpdater, maxIterations, parameters)
 
 // user-defined functions
-final class VertexUpdater {
-	...
-	// get the number of vertices
-	val numVertices = getNumberOfVertices
-	...
-}
-
-final class Messenger {
+final class Messenger extends ScatterFunction {
 	...
 	// retrieve the vertex out-degree
 	val outDegree = getOutDegree
+	...
+}
+
+final class VertexUpdater extends GatherFunction {
+	...
+	// get the number of vertices
+	val numVertices = getNumberOfVertices
 	...
 }
 
@@ -1419,13 +1419,13 @@ parameters.setDirection(EdgeDirection.IN);
 // run the scatter-gather iteration, also passing the configuration parameters
 DataSet<Vertex<Long, HashSet<Long>>> result =
 			graph.runScatterGatherIteration(
-			new VertexUpdater(), new Messenger(), maxIterations, parameters)
+			new Messenger(), new VertexUpdater(), maxIterations, parameters)
 			.getVertices();
 
 // user-defined functions
-public static final class VertexUpdater {...}
+public static final class Messenger extends GatherFunction {...}
 
-public static final class Messenger {...}
+public static final class VertexUpdater extends ScatterFunction {...}
 
 {% endhighlight %}
 </div>
@@ -1441,13 +1441,13 @@ val parameters = new ScatterGatherConfiguration
 parameters.setDirection(EdgeDirection.IN)
 
 // run the scatter-gather iteration, also passing the configuration parameters
-val result = graph.runScatterGatherIteration(new VertexUpdater, new Messenger, maxIterations, parameters)
+val result = graph.runScatterGatherIteration(new Messenger, new VertexUpdater, maxIterations, parameters)
 			.getVertices
 
 // user-defined functions
-final class VertexUpdater {...}
+final class Messenger extends ScatterFunction {...}
 
-final class Messenger {...}
+final class VertexUpdater extends GatherFunction {...}
 
 {% endhighlight %}
 </div>
@@ -1828,12 +1828,14 @@ Gelly has a growing collection of graph algorithms for easily analyzing large-sc
 * [GSA PageRank](#gsa-pagerank)
 * [Single Source Shortest Paths](#single-source-shortest-paths)
 * [GSA Single Source Shortest Paths](#gsa-single-source-shortest-paths)
-* [GSA Triangle Count](#gsa-triangle-count)
+* [Triangle Count](#triangle-count)
 * [Triangle Enumerator](#triangle-enumerator)
 * [Hyperlink-Induced Topic Search](#hyperlink-induced-topic-search)
 * [Summarization](#summarization)
+* [Adamic-Adar](#adamic-adar)
 * [Jaccard Index](#jaccard-index)
 * [Local Clustering Coefficient](#local-clustering-coefficient)
+* [Global Clustering Coefficient](#global-clustering-coefficient)
 
 Gelly's library methods can be used by simply calling the `run()` method on the input graph:
 
@@ -1857,10 +1859,10 @@ verticesWithCommunity.print();
 {% highlight scala %}
 val env = ExecutionEnvironment.getExecutionEnvironment
 
-val graph: Graph[Long, Long, NullValue] = ...
+val graph: Graph[java.lang.Long, java.lang.Long, NullValue] = ...
 
 // run Label Propagation for 30 iterations to detect communities on the input graph
-val verticesWithCommunity = graph.run(new LabelPropagation[Long](30))
+val verticesWithCommunity = graph.run(new LabelPropagation[java.lang.Long, java.lang.Long, NullValue](30))
 
 // print the result
 verticesWithCommunity.print
@@ -1967,7 +1969,6 @@ The constructors take the following parameters:
 
 * `beta`: the damping factor.
 * `maxIterations`: the maximum number of iterations to run.
-* `numVertices`: the number of vertices in the input. If known beforehand, is it advised to provide this argument to speed up execution.
 
 ### GSA PageRank
 
@@ -1998,19 +1999,23 @@ The algorithm is implemented using [gather-sum-apply iterations](#gather-sum-app
 
 See the [Single Source Shortest Paths](#single-source-shortest-paths) library method for implementation details and usage information.
 
-### GSA Triangle Count
+### Triangle Count
 
 #### Overview
-An implementation of the Triangle Count algorithm. Given an input graph, it returns the number of unique triangles in it.
+An analytic for counting the number of unique triangles in a graph.
 
 #### Details
-This algorithm operates in three phases. First, vertices select neighbors with IDs greater than theirs
-and send messages to them. Each received message is then propagated to neighbors with higher IDs.
-Finally, if a node encounters the target ID in the list of received messages, it increments the number of discovered triangles.
+Counts the triangles generated by [Triangle Listing](#triangle-listing).
 
 #### Usage
-The algorithm takes an undirected, unweighted graph as input and outputs a `DataSet` which contains a single integer corresponding to the number of triangles
-in the graph. The algorithm constructor takes no arguments.
+The analytic takes an undirected graph as input and returns as a result a `Long` corresponding to the number of triangles
+in the graph. The graph ID type must be `Comparable` and `Copyable`.
+
+### Triangle Listing
+
+This algorithm supports object reuse. The graph ID type must be `Comparable` and `Copyable`.
+
+See the [Triangle Enumerator](#triangle-enumerator) library method for implementation details.
 
 ### Triangle Enumerator
 
@@ -2033,19 +2038,18 @@ Each `Tuple3` corresponds to a triangle, with the fields containing the IDs of t
 
 #### Overview
 [Hyperlink-Induced Topic Search](http://www.cs.cornell.edu/home/kleinber/auth.pdf) (HITS, or "Hubs and Authorities")
-computes two interdependent scores for every vertex in a directed graph. Good hubs are those which point to many 
+computes two interdependent scores for every vertex in a directed graph. Good hubs are those which point to many
 good authorities and good authorities are those pointed to by many good hubs.
  
 #### Details
-HITS ranking relies on an iterative method converging to a stationary solution. Each vertex in the directed graph is assigned same non-negative
-hub and authority scores. Then the algorithm iteratively updates the scores until termination. Current implementation divides the iteration
-into two phases, authority scores can be computed until hub scores updating and normalising finished, hub scores can be computed until
-authority scores updating and normalising finished.
+Every vertex is assigned the same initial hub and authority scores. The algorithm then iteratively updates the scores
+until termination. During each iteration new hub scores are computed from the authority scores, then new authority
+scores are computed from the new hub scores. The scores are then normalized and optionally tested for convergence.
 
 #### Usage
-The algorithm takes a directed graph as input and outputs a `DataSet` of vertices, where the vertex value is a `Tuple2` 
-containing the hub and authority score after maximum iterations.
- 
+The algorithm takes a directed graph as input and outputs a `DataSet` of `Tuple3` containing the vertex ID, hub score,
+and authority score.
+
 ### Summarization
 
 #### Overview
@@ -2069,6 +2073,28 @@ corresponding groupings.
 The algorithm takes a directed, vertex (and possibly edge) attributed graph as input and outputs a new graph where each
 vertex represents a group of vertices and each edge represents a group of edges from the input graph. Furthermore, each
 vertex and edge in the output graph stores the common group value and the number of represented elements.
+
+### Adamic-Adar
+
+#### Overview
+Adamic-Adar measures the similarity between pairs of vertices as the sum of the inverse logarithm of degree over shared
+neighbors. Scores are non-negative and unbounded. A vertex with higher degree has greater overall influence but is less
+influential to each pair of neighbors.
+
+#### Details
+The algorithm first annotates each vertex with the inverse of the logarithm of the vertex degree then joins this score
+onto edges by source vertex. Grouping on the source vertex, each pair of neighbors is emitted with the vertex score.
+Grouping on two-paths, the Adamic-Adar score is summed.
+
+See the [Jaccard Index](#jaccard-index) library method for a similar algorithm.
+
+#### Usage
+The algorithm takes a simple, undirected graph as input and outputs a `DataSet` of tuples containing two vertex IDs and
+the Adamic-Adair similarity score. The graph ID type must be `Comparable` and `Copyable`.
+
+* `setLittleParallelism`: override the parallelism of operators processing small amounts of data
+* `setMinimumRatio`: filter out Adamic-Adar scores less than the given ratio times the average score
+* `setMinimumScore`: filter out Adamic-Adar scores less than the given minimum
 
 ### Jaccard Index
 
@@ -2108,8 +2134,25 @@ divided by the number of potential edges between neighbors.
 See the [Triangle Enumeration](#triangle-enumeration) library method for a detailed explanation of triangle enumeration.
 
 #### Usage
-The algorithm takes a simple, undirected graph as input and outputs a `DataSet` of tuples containing the vertex ID,
-vertex degree, and number of triangles containing the vertex. The vertex ID must be `Comparable` and `Copyable`.
+Directed and undirected variants are provided. The algorithms take a simple graph as input and output a `DataSet` of
+tuples containing the vertex ID, vertex degree, and number of triangles containing the vertex. The graph ID type must be
+`Comparable` and `Copyable`.
+
+### Global Clustering Coefficient
+
+#### Overview
+The global clustering coefficient measures the connectedness of a graph. Scores range from 0.0 (no edges between
+neighbors) to 1.0 (complete graph).
+
+#### Details
+See the [Local Clustering Coefficient](#local-clustering-coefficient) library method for a detailed explanation of
+clustering coefficient.
+
+#### Usage
+Directed and undirected variants are provided. The algorithm takes a simple graph as input and outputs a result
+containing the total number of triplets and triangles in the graph. The graph ID type must be `Comparable` and
+`Copyable`.
+
 
 {% top %}
 
@@ -2165,17 +2208,62 @@ DataSet<Vertex<K, LongValue>> outDegree = graph
     </tr>
 
     <tr>
-      <td>degree.annotate.directed.<br/><strong>VertexDegreePair</strong></td>
+      <td>degree.annotate.directed.<br/><strong>VertexDegrees</strong></td>
       <td>
-        <p>Annotate vertices of a <a href="#graph-representation">directed graph</a> with both the out-degree and in-degree.</p>
+        <p>Annotate vertices of a <a href="#graph-representation">directed graph</a> with the degree, out-degree, and in-degree.</p>
 {% highlight java %}
-DataSet<Vertex<K, Tuple2<LongValue, LongValue>>> pairDegree = graph
-  .run(new VertexDegreePair()
+DataSet<Vertex<K, Tuple2<LongValue, LongValue>>> degrees = graph
+  .run(new VertexDegrees()
     .setIncludeZeroDegreeVertices(true));
 {% endhighlight %}
         <p>Optional configuration:</p>
         <ul>
           <li><p><strong>setIncludeZeroDegreeVertices</strong>: by default only the edge set is processed for the computation of degree; when this flag is set an additional join is performed against the vertex set in order to output vertices with out- and in-degree of zero</p></li>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>degree.annotate.directed.<br/><strong>EdgeSourceDegrees</strong></td>
+      <td>
+        <p>Annotate edges of a <a href="#graph-representation">directed graph</a> with the degree, out-degree, and in-degree of the source ID.</p>
+{% highlight java %}
+DataSet<Edge<K, Tuple2<EV, Degrees>>> sourceDegrees = graph
+  .run(new EdgeSourceDegrees());
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>degree.annotate.directed.<br/><strong>EdgeTargetDegrees</strong></td>
+      <td>
+        <p>Annotate edges of a <a href="#graph-representation">directed graph</a> with the degree, out-degree, and in-degree of the target ID.</p>
+{% highlight java %}
+DataSet<Edge<K, Tuple2<EV, Degrees>>> targetDegrees = graph
+  .run(new EdgeTargetDegrees();
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>degree.annotate.directed.<br/><strong>EdgeDegreesPair</strong></td>
+      <td>
+        <p>Annotate edges of a <a href="#graph-representation">directed graph</a> with the degree, out-degree, and in-degree of both the source and target vertices.</p>
+{% highlight java %}
+DataSet<Edge<K, Tuple2<EV, Degrees>>> degrees = graph
+  .run(new EdgeDegreesPair());
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
           <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
         </ul>
       </td>
@@ -2237,7 +2325,7 @@ DataSet<Edge<K, Tuple2<EV, LongValue>>> targetDegree = graph
     <tr>
       <td>degree.annotate.undirected.<br/><strong>EdgeDegreePair</strong></td>
       <td>
-        <p>Annotate edges of an <a href="#graph-representation">undirected graph</a> with the degree of both the source and target degree ID.</p>
+        <p>Annotate edges of an <a href="#graph-representation">undirected graph</a> with the degree of both the source and target vertices.</p>
 {% highlight java %}
 DataSet<Edge<K, Tuple3<EV, LongValue, LongValue>>> pairDegree = graph
   .run(new EdgeDegreePair()
@@ -2247,6 +2335,53 @@ DataSet<Edge<K, Tuple3<EV, LongValue, LongValue>>> pairDegree = graph
         <ul>
           <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
           <li><p><strong>setReduceOnTargetId</strong>: the degree can be counted from either the edge source or target IDs. By default the source IDs are counted. Reducing on target IDs may optimize the algorithm if the input edge list is sorted by target ID.</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>degree.filter.undirected.<br/><strong>MaximumDegree</strong></td>
+      <td>
+        <p>Filter an <a href="#graph-representation">undirected graph</a> by maximum degree.</p>
+{% highlight java %}
+Graph<K, VV, EV> filteredGraph = graph
+  .run(new MaximumDegree(5000)
+    .setBroadcastHighDegreeVertices(true)
+    .setReduceOnTargetId(true));
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setBroadcastHighDegreeVertices</strong>: join high-degree vertices using a broadcast-hash to reduce data shuffling when removing a relatively small number of high-degree vertices.</p></li>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+          <li><p><strong>setReduceOnTargetId</strong>: the degree can be counted from either the edge source or target IDs. By default the source IDs are counted. Reducing on target IDs may optimize the algorithm if the input edge list is sorted by target ID.</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>simple.directed.<br/><strong>Simplify</strong></td>
+      <td>
+        <p>Remove self-loops and duplicate edges from a <a href="#graph-representation">directed graph</a>.</p>
+{% highlight java %}
+graph.run(new Simplify());
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
+      </td>
+    </tr>
+
+    <tr>
+      <td>simple.undirected.<br/><strong>Simplify</strong></td>
+      <td>
+        <p>Add symmetric edges and remove self-loops and duplicate edges from an <a href="#graph-representation">undirected graph</a>.</p>
+{% highlight java %}
+graph.run(new Simplify());
+{% endhighlight %}
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
         </ul>
       </td>
     </tr>
@@ -2262,6 +2397,10 @@ graph.run(new TranslateGraphIds(new LongValueToStringValue()));
         <ul>
           <li><p><strong>translator</strong>: implements type or value conversion</p></li>
         </ul>
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
       </td>
     </tr>
 
@@ -2276,6 +2415,10 @@ graph.run(new TranslateVertexValues(new LongValueAddOffset(vertexCount)));
         <ul>
           <li><p><strong>translator</strong>: implements type or value conversion</p></li>
         </ul>
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
+        </ul>
       </td>
     </tr>
 
@@ -2289,6 +2432,10 @@ graph.run(new TranslateEdgeValues(new Nullify()));
         <p>Required configuration:</p>
         <ul>
           <li><p><strong>translator</strong>: implements type or value conversion</p></li>
+        </ul>
+        <p>Optional configuration:</p>
+        <ul>
+          <li><p><strong>setParallelism</strong>: override the operator parallelism</p></li>
         </ul>
       </td>
     </tr>
@@ -2792,7 +2939,6 @@ boolean clipAndFlip = false;
 Graph<LongValue,NullValue,NullValue> graph = new RMatGraph<>(env, rnd, vertexCount, edgeCount)
     .setConstants(0.57f, 0.19f, 0.19f)
     .setNoise(true, 0.10f)
-    .setSimpleGraph(true, clipAndFlip)
     .generate();
 {% endhighlight %}
 </div>
@@ -2809,7 +2955,7 @@ val edgeCount = edgeFactor * vertexCount
 
 clipAndFlip = false
 
-val graph = new RMatGraph(env.getJavaEnv, rnd, vertexCount, edgeCount).setConstants(0.57f, 0.19f, 0.19f).setNoise(true, 0.10f).setSimpleGraph(true, clipAndFlip).generate()
+val graph = new RMatGraph(env.getJavaEnv, rnd, vertexCount, edgeCount).setConstants(0.57f, 0.19f, 0.19f).setNoise(true, 0.10f).generate()
 {% endhighlight %}
 </div>
 </div>

@@ -118,6 +118,22 @@ class Environment(object):
         self._sources.append(child)
         return child_set
 
+    def generate_sequence(self, frm, to):
+        """
+        Creates a new data set that contains the given sequence
+
+        :param frm: The start number for the sequence.
+        :param to: The end number for the sequence.
+        :return: A DataSet representing the given sequence of numbers.
+        """
+        child = OperationInfo()
+        child_set = DataSet(self, child)
+        child.identifier = _Identifier.SOURCE_SEQ
+        child.frm = frm
+        child.to = to
+        self._sources.append(child)
+        return child_set
+
     def set_parallelism(self, parallelism):
         """
         Sets the parallelism for operations executed through this environment.
@@ -168,6 +184,7 @@ class Environment(object):
                 port = int(sys.stdin.readline().rstrip('\n'))
 
                 id = int(sys.stdin.readline().rstrip('\n'))
+                subtask_index = int(sys.stdin.readline().rstrip('\n'))
                 input_path = sys.stdin.readline().rstrip('\n')
                 output_path = sys.stdin.readline().rstrip('\n')
 
@@ -177,7 +194,7 @@ class Environment(object):
                     if set.id == id:
                         used_set = set
                         operator = set.operator
-                operator._configure(input_path, output_path, port, self, used_set)
+                operator._configure(input_path, output_path, port, self, used_set, subtask_index)
                 operator._go()
                 operator._close()
                 sys.stdout.flush()
@@ -270,6 +287,8 @@ class Environment(object):
         collect(set.delimiter_field)
         collect(set.write_mode)
         collect(set.path)
+        collect(set.frm)
+        collect(set.to)
         collect(set.id)
         collect(set.to_err)
         collect(set.count)

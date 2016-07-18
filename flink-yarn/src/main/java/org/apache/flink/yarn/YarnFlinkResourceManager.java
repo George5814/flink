@@ -29,8 +29,6 @@ import org.apache.flink.runtime.clusterframework.ApplicationStatus;
 import org.apache.flink.runtime.clusterframework.ContaineredTaskManagerParameters;
 import org.apache.flink.runtime.clusterframework.messages.StopCluster;
 import org.apache.flink.runtime.clusterframework.types.ResourceID;
-import org.apache.flink.runtime.instance.ActorGateway;
-import org.apache.flink.runtime.instance.AkkaActorGateway;
 import org.apache.flink.runtime.leaderretrieval.LeaderRetrievalService;
 import org.apache.flink.yarn.messages.ContainersAllocated;
 import org.apache.flink.yarn.messages.ContainersComplete;
@@ -181,8 +179,7 @@ public class YarnFlinkResourceManager extends FlinkResourceManager<RegisteredYar
 		LOG.info("Initializing YARN resource master");
 
 		// create the client to communicate with the ResourceManager
-		ActorGateway selfGateway = new AkkaActorGateway(self(), getLeaderSessionID());
-		resourceManagerCallbackHandler = new YarnResourceManagerCallbackHandler(selfGateway);
+		resourceManagerCallbackHandler = new YarnResourceManagerCallbackHandler(self());
 
 		resourceManagerClient = AMRMClientAsync.createAMRMClientAsync(
 			yarnHeartbeatIntervalMillis, resourceManagerCallbackHandler);
@@ -215,18 +212,12 @@ public class YarnFlinkResourceManager extends FlinkResourceManager<RegisteredYar
 			final long now = System.currentTimeMillis();
 			for (Container c : containersFromPreviousAttempts) {
 				YarnContainerInLaunch containerInLaunch = new YarnContainerInLaunch(c, now);
-				containersInLaunch.put(containerInLaunch, containerInLaunch);
+				containersInLaunch.put(containerInLaunch.getResourceID(), containerInLaunch);
 			}
 
 			// adjust the progress indicator
 			updateProgress();
 		}
-	}
-
-	@Override
-	protected void leaderUpdated() {
-		AkkaActorGateway newGateway = new AkkaActorGateway(self(), getLeaderSessionID());
-		resourceManagerCallbackHandler.setCurrentLeaderGateway(newGateway);
 	}
 
 	@Override
@@ -388,7 +379,8 @@ public class YarnFlinkResourceManager extends FlinkResourceManager<RegisteredYar
 			if (numRegistered + containersInLaunch.size() < numRequired) {
 				// start a TaskManager
 				final YarnContainerInLaunch containerInLaunch = new YarnContainerInLaunch(container);
-				containersInLaunch.put(containerInLaunch, containerInLaunch);
+				final ResourceID resourceID = containerInLaunch.getResourceID();
+				containersInLaunch.put(resourceID, containerInLaunch);
 
 				String message = "Launching TaskManager in container " + containerInLaunch
 					+ " on host " + container.getNodeId().getHost();
@@ -398,12 +390,12 @@ public class YarnFlinkResourceManager extends FlinkResourceManager<RegisteredYar
 				try {
 					// set a special environment variable to uniquely identify this container
 					taskManagerLaunchContext.getEnvironment()
-						.put(ENV_FLINK_CONTAINER_ID, containerInLaunch.getResourceIdString());
+						.put(ENV_FLINK_CONTAINER_ID, resourceID.getResourceIdString());
 					nodeManagerClient.startContainer(container, taskManagerLaunchContext);
 				}
 				catch (Throwable t) {
 					// failed to launch the container
-					containersInLaunch.remove(containerInLaunch);
+					containersInLaunch.remove(resourceID);
 
 					// return container, a new one will be requested eventually
 					LOG.error("Could not start TaskManager in container " + containerInLaunch, t);
@@ -515,6 +507,15 @@ public class YarnFlinkResourceManager extends FlinkResourceManager<RegisteredYar
 	// ------------------------------------------------------------------------
 	//  Utilities
 	// ------------------------------------------------------------------------
+
+	/**
+	 * Extracts a unique ResourceID from the Yarn Container.
+	 * @param container The Yarn container
+	 * @return The ResourceID for the container
+	 */
+	static ResourceID extractResourceID(Container container) {
+		return new ResourceID(container.getId().toString());
+	}
 
 	private void updateProgress() {
 		final int required = getDesignatedWorkerPoolSize();
